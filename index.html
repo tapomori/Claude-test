@@ -59,7 +59,7 @@
 </header>
 <div class="games" id="games"></div>
 <script>
-fetch('games.json', { cache: 'no-store' })
+fetch('games.json?t=' + Date.now(), { cache: 'no-store' })
   .then(r => r.json())
   .then(games => {
     const c = document.getElementById('games');
