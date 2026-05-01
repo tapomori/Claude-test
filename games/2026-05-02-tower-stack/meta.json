@@ -1,0 +1,8 @@
+{
+  "title": "Tower Stack",
+  "date": "2026-05-02",
+  "description": "左右に動くブロックをタップして積み上げる。ズレた分は削れて、どんどん細くなる。何段積めるか？",
+  "tags": ["timing", "tap", "stack"],
+  "rating": null,
+  "notes": ""
+}
