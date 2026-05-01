@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Tower Stack</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: #070912; color: #e6edf3;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", system-ui, sans-serif;
+    touch-action: manipulation;
+    user-select: none; -webkit-user-select: none;
+    overscroll-behavior: none;
+  }
+  #game {
+    position: fixed; inset: 0;
+    width: 100vw; height: 100vh;
+    overflow: hidden;
+  }
+  canvas { display: block; }
+  .ui {
+    position: absolute;
+    top: env(safe-area-inset-top, 0); left: 0; right: 0;
+    padding: 14px 16px;
+    pointer-events: none;
+    display: flex; justify-content: space-between; align-items: center;
+    z-index: 5;
+  }
+  .score {
+    font-size: 38px; font-weight: 800; letter-spacing: -0.03em;
+    text-shadow: 0 2px 16px rgba(88, 166, 255, 0.4);
+  }
+  .back {
+    pointer-events: auto;
+    color: #c9d1d9; text-decoration: none;
+    font-size: 13px; font-weight: 500;
+    background: rgba(22, 27, 34, 0.65);
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid #30363d;
+    backdrop-filter: blur(6px);
+  }
+  .back:active { background: rgba(48, 54, 61, 0.8); }
+  .spacer { width: 64px; }
+  .hint {
+    position: absolute;
+    bottom: calc(env(safe-area-inset-bottom, 0) + 32px);
+    left: 0; right: 0;
+    text-align: center; font-size: 15px; color: #8b949e;
+    pointer-events: none;
+    animation: fade 1.6s ease-in-out infinite;
+    z-index: 5;
+  }
+  @keyframes fade { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .gameover {
+    position: absolute; inset: 0;
+    background: rgba(7, 9, 18, 0.92);
+    backdrop-filter: blur(8px);
+    display: none;
+    flex-direction: column; align-items: center; justify-content: center;
+    z-index: 10;
+    padding: 24px;
+  }
+  .gameover.show {
+    display: flex;
+    animation: pop 0.3s ease-out;
+  }
+  @keyframes pop { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+  .go-title { font-size: 13px; font-weight: 600; color: #8b949e; letter-spacing: 0.2em; margin-bottom: 12px; }
+  .go-score {
+    font-size: 84px; font-weight: 800; line-height: 1; margin-bottom: 16px;
+    background: linear-gradient(135deg, #58a6ff 0%, #ff7b72 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .go-best { font-size: 13px; color: #8b949e; margin-bottom: 36px; }
+  .go-best b { color: #ffd33d; font-weight: 700; }
+  .btn {
+    padding: 14px 40px; font-size: 16px; font-weight: 600;
+    background: #238636; color: white; border: none; border-radius: 999px;
+    cursor: pointer; pointer-events: auto;
+    transition: transform 0.1s;
+  }
+  .btn:active { transform: scale(0.96); background: #1f6f2e; }
+  .perfect-flash {
+    position: absolute; inset: 0;
+    pointer-events: none;
+    background: radial-gradient(circle at center, rgba(255, 215, 61, 0.35), transparent 60%);
+    opacity: 0;
+    z-index: 4;
+  }
+  .perfect-flash.on {
+    animation: flash 0.4s ease-out;
+  }
+  @keyframes flash { 0% { opacity: 1; } 100% { opacity: 0; } }
+</style>
+</head>
+<body>
+<div id="game">
+  <canvas id="c"></canvas>
+  <div class="perfect-flash" id="flash"></div>
+  <div class="ui">
+    <a class="back" href="../../index.html">← 戻る</a>
+    <div class="score" id="score">0</div>
+    <div class="spacer"></div>
+  </div>
+  <div class="hint" id="hint">画面をタップして積む</div>
+  <div class="gameover" id="go">
+    <div class="go-title">GAME OVER</div>
+    <div class="go-score" id="goScore">0</div>
+    <div class="go-best" id="goBest">Best <b>0</b></div>
+    <button class="btn" id="retry">もう一度</button>
+  </div>
+</div>
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const hintEl = document.getElementById('hint');
+  const goEl = document.getElementById('go');
+  const goScoreEl = document.getElementById('goScore');
+  const goBestEl = document.getElementById('goBest');
+  const retryBtn = document.getElementById('retry');
+  const flashEl = document.getElementById('flash');
+
+  let W, H, dpr;
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = Math.floor(W * dpr);
+    canvas.height = Math.floor(H * dpr);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  const BLOCK_H = 30;
+  const GAP = 2;
+  let BASE_W;
+
+  let stack, current, falling, particles, cameraY, targetCameraY;
+  let score, best, gameOver, speed, comboPerfect;
+
+  best = parseInt(localStorage.getItem('towerStackBest') || '0', 10);
+
+  function reset() {
+    BASE_W = Math.min(W * 0.72, 280);
+    stack = [];
+    falling = [];
+    particles = [];
+    cameraY = 0;
+    targetCameraY = 0;
+    score = 0;
+    speed = 2.0;
+    comboPerfect = 0;
+    gameOver = false;
+    goEl.classList.remove('show');
+    hintEl.style.display = 'block';
+
+    const baseY = H - 100;
+    stack.push({ x: (W - BASE_W) / 2, y: baseY, w: BASE_W, h: BLOCK_H, hue: 200 });
+    spawnCurrent();
+    updateScore();
+  }
+
+  function spawnCurrent() {
+    const top = stack[stack.length - 1];
+    const dir = stack.length % 2 === 0 ? 1 : -1;
+    current = {
+      x: dir > 0 ? -top.w + 4 : W - 4,
+      y: top.y - BLOCK_H - GAP,
+      w: top.w,
+      h: BLOCK_H,
+      vx: speed * dir,
+      hue: (200 + stack.length * 22) % 360,
+    };
+  }
+
+  function drop() {
+    if (gameOver || !current) return;
+    if (hintEl.style.display !== 'none') hintEl.style.display = 'none';
+
+    const top = stack[stack.length - 1];
+    const left = Math.max(current.x, top.x);
+    const right = Math.min(current.x + current.w, top.x + top.w);
+    const overlap = right - left;
+
+    if (overlap <= 0) {
+      falling.push({
+        x: current.x, y: current.y, w: current.w, h: current.h,
+        hue: current.hue, vy: 0, vx: current.vx * 0.4,
+        rot: 0, vrot: (Math.random() - 0.5) * 0.08
+      });
+      current = null;
+      endGame();
+      return;
+    }
+
+    if (current.x < top.x) {
+      falling.push({
+        x: current.x, y: current.y, w: top.x - current.x, h: current.h,
+        hue: current.hue, vy: 0, vx: -2.5,
+        rot: 0, vrot: -0.07
+      });
+    }
+    if (current.x + current.w > top.x + top.w) {
+      const cutW = (current.x + current.w) - (top.x + top.w);
+      falling.push({
+        x: top.x + top.w, y: current.y, w: cutW, h: current.h,
+        hue: current.hue, vy: 0, vx: 2.5,
+        rot: 0, vrot: 0.07
+      });
+    }
+
+    const offset = Math.abs(current.x - top.x);
+    const perfect = offset < 4;
+    let placed;
+    if (perfect) {
+      const grow = Math.min(8, BASE_W - overlap);
+      placed = {
+        x: Math.max(top.x - grow / 2, left - grow / 2),
+        y: current.y, w: overlap + grow, h: BLOCK_H, hue: current.hue
+      };
+      comboPerfect++;
+      burst(placed.x + placed.w / 2, placed.y + placed.h / 2, placed.hue, 28, true);
+      flashEl.classList.remove('on');
+      void flashEl.offsetWidth;
+      flashEl.classList.add('on');
+      if (navigator.vibrate) navigator.vibrate(25);
+    } else {
+      placed = { x: left, y: current.y, w: overlap, h: BLOCK_H, hue: current.hue };
+      comboPerfect = 0;
+      burst(left, current.y + BLOCK_H / 2, placed.hue, 8);
+      burst(right, current.y + BLOCK_H / 2, placed.hue, 8);
+      if (navigator.vibrate) navigator.vibrate(10);
+    }
+
+    stack.push(placed);
+    score++;
+    updateScore();
+
+    targetCameraY = Math.max(0, stack.length * (BLOCK_H + GAP) - H * 0.55);
+    speed = Math.min(5.8, 2.0 + score * 0.09);
+
+    if (placed.w < 8) {
+      setTimeout(() => endGame(), 200);
+      current = null;
+      return;
+    }
+    spawnCurrent();
+  }
+
+  function burst(x, y, hue, n, big = false) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const v = (big ? 2.5 : 1.4) + Math.random() * 2.2;
+      particles.push({
+        x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - (big ? 1.5 : 0.6),
+        life: 1, decay: 0.018 + Math.random() * 0.02,
+        size: 2 + Math.random() * (big ? 4 : 2.5), hue
+      });
+    }
+  }
+
+  function endGame() {
+    if (gameOver) return;
+    gameOver = true;
+    if (score > best) {
+      best = score;
+      localStorage.setItem('towerStackBest', String(best));
+    }
+    goScoreEl.textContent = score;
+    goBestEl.innerHTML = `Best <b>${best}</b>`;
+    setTimeout(() => goEl.classList.add('show'), 700);
+    if (navigator.vibrate) navigator.vibrate([40, 80, 40]);
+  }
+
+  function updateScore() { scoreEl.textContent = score; }
+
+  function loop() {
+    cameraY += (targetCameraY - cameraY) * 0.12;
+
+    if (current && !gameOver) {
+      current.x += current.vx;
+      const margin = 14;
+      if (current.vx > 0 && current.x + current.w > W - margin) current.vx = -Math.abs(current.vx);
+      if (current.vx < 0 && current.x < margin) current.vx = Math.abs(current.vx);
+    }
+
+    for (const f of falling) {
+      f.vy += 0.45;
+      f.y += f.vy;
+      f.x += f.vx;
+      f.rot += f.vrot;
+    }
+    falling = falling.filter(f => f.y - cameraY < H + 300);
+
+    for (const p of particles) {
+      p.vy += 0.18;
+      p.x += p.vx;
+      p.y += p.vy;
+      p.life -= p.decay;
+    }
+    particles = particles.filter(p => p.life > 0);
+
+    const bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, '#10172a');
+    bg.addColorStop(1, '#050811');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    for (let i = 0; i < 36; i++) {
+      const sx = (i * 97) % W;
+      const sy = (((i * 173) - cameraY * 0.25) % H + H) % H;
+      const sz = (i % 3 === 0) ? 2 : 1;
+      ctx.fillRect(sx, sy, sz, sz);
+    }
+
+    ctx.save();
+    ctx.translate(0, cameraY);
+
+    for (let i = 0; i < stack.length; i++) {
+      drawBlock(stack[i]);
+    }
+    for (const f of falling) {
+      ctx.save();
+      ctx.translate(f.x + f.w / 2, f.y + f.h / 2);
+      ctx.rotate(f.rot);
+      drawBlockRel(-f.w / 2, -f.h / 2, f.w, f.h, f.hue, 0.85);
+      ctx.restore();
+    }
+    if (current) {
+      drawBlock(current);
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      const top = stack[stack.length - 1];
+      ctx.fillRect(current.x, top.y - 2, current.w, 2);
+    }
+    for (const p of particles) {
+      ctx.fillStyle = `hsla(${p.hue}, 85%, 68%, ${Math.max(0, p.life)})`;
+      ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    }
+    ctx.restore();
+
+    requestAnimationFrame(loop);
+  }
+
+  function drawBlock(b) {
+    drawBlockRel(b.x, b.y, b.w, b.h, b.hue, 1);
+  }
+  function drawBlockRel(x, y, w, h, hue, alpha) {
+    const grad = ctx.createLinearGradient(x, y, x, y + h);
+    grad.addColorStop(0, `hsla(${hue}, 85%, 68%, ${alpha})`);
+    grad.addColorStop(1, `hsla(${hue}, 75%, 42%, ${alpha})`);
+    ctx.fillStyle = grad;
+    roundRect(x, y, w, h, 6);
+    ctx.fill();
+    ctx.strokeStyle = `hsla(${hue}, 95%, 80%, ${0.45 * alpha})`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = `hsla(${hue}, 95%, 85%, ${0.18 * alpha})`;
+    ctx.fillRect(x + 4, y + 3, Math.max(0, w - 8), 2);
+  }
+  function roundRect(x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    if (r < 0) r = 0;
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  let lastTouch = 0;
+  function handleTap(e, isTouch) {
+    if (e.target.closest('.back') || e.target.closest('.btn')) return;
+    if (isTouch) lastTouch = Date.now();
+    else if (Date.now() - lastTouch < 500) return;
+    e.preventDefault();
+    if (gameOver) return;
+    drop();
+  }
+  document.addEventListener('touchstart', e => handleTap(e, true), { passive: false });
+  document.addEventListener('mousedown', e => handleTap(e, false));
+  retryBtn.addEventListener('click', () => reset());
+
+  reset();
+  loop();
+})();
+</script>
+</body>
+</html>
