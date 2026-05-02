@@ -19,5 +19,12 @@
     "date": "2026-05-03",
     "description": "光った色の順番を覚えて、同じ順にタップで再現。ステージごとに1色ずつ伸びていく王道メモリーゲーム。",
     "tags": ["memory", "tap", "sequence"]
+  },
+  {
+    "slug": "2026-05-02-neon-trail",
+    "title": "Neon Trail",
+    "date": "2026-05-02",
+    "description": "指でなぞって光る星を集めよう。バウンドする赤い敵に触れたらアウト。30秒で何個取れる？",
+    "tags": ["swipe", "drag", "dodge", "arcade"]
   }
 ]
