@@ -14,6 +14,13 @@
     "tags": ["timing", "tap", "stack"]
   },
   {
+    "slug": "2026-05-02-neon-trail",
+    "title": "Neon Trail",
+    "date": "2026-05-02",
+    "description": "指でなぞって光る星を集めよう。バウンドする赤い敵に触れたらアウト。30秒で何個取れる？",
+    "tags": ["swipe", "drag", "dodge", "arcade"]
+  },
+  {
     "slug": "2026-05-03-color-echo",
     "title": "Color Echo",
     "date": "2026-05-03",
@@ -21,10 +28,10 @@
     "tags": ["memory", "tap", "sequence"]
   },
   {
-    "slug": "2026-05-02-neon-trail",
-    "title": "Neon Trail",
-    "date": "2026-05-02",
-    "description": "指でなぞって光る星を集めよう。バウンドする赤い敵に触れたらアウト。30秒で何個取れる？",
-    "tags": ["swipe", "drag", "dodge", "arcade"]
+    "slug": "2026-05-03-arrow-burst",
+    "title": "Arrow Burst",
+    "date": "2026-05-03",
+    "description": "現れた矢印の方向に素早くスワイプ！速いほど時間ボーナス、コンボで高得点。時間切れまでにどこまで稼げる？",
+    "tags": ["swipe", "reflex", "action"]
   }
 ]

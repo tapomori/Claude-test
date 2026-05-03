@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Arrow Burst</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: #0d1117;
+    color: #e6edf3;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", system-ui, sans-serif;
+    touch-action: manipulation;
+    overscroll-behavior: none;
+  }
+  body {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column;
+  }
+  .top {
+    padding: 12px 16px;
+    display: flex; justify-content: space-between; align-items: center;
+    z-index: 10;
+  }
+  .back {
+    color: #8b949e;
+    text-decoration: none;
+    font-size: 13px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.04);
+  }
+  .stats {
+    display: flex; gap: 14px; font-size: 12px; color: #8b949e;
+  }
+  .stats b { color: #e6edf3; font-size: 16px; font-weight: 700; margin-left: 4px; }
+
+  .timebar-wrap {
+    margin: 0 16px;
+    height: 6px;
+    background: #21262d;
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .timebar {
+    height: 100%;
+    width: 100%;
+    background: linear-gradient(90deg, #58a6ff, #a371f7);
+    transform-origin: left center;
+    transition: background 0.2s;
+  }
+  .timebar.warn { background: linear-gradient(90deg, #f85149, #ff7b72); }
+
+  #stage {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .combo {
+    position: absolute;
+    top: 16px; left: 50%;
+    transform: translateX(-50%);
+    font-size: 14px;
+    color: #8b949e;
+    letter-spacing: 0.05em;
+    pointer-events: none;
+  }
+  .combo b { color: #f0c674; font-size: 22px; font-weight: 800; margin-left: 4px; }
+  .combo.hide { opacity: 0; }
+
+  .arrow {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 56vw; height: 56vw;
+    max-width: 280px; max-height: 280px;
+    display: flex; align-items: center; justify-content: center;
+    pointer-events: none;
+    transition: transform 0.18s cubic-bezier(.2,.8,.2,1), opacity 0.18s;
+    will-change: transform, opacity;
+  }
+  .arrow svg {
+    width: 100%; height: 100%;
+    filter: drop-shadow(0 6px 20px currentColor);
+  }
+  .arrow.fly-up    { transform: translate(-50%, -180%) scale(0.6); opacity: 0; }
+  .arrow.fly-down  { transform: translate(-50%,   80%) scale(0.6); opacity: 0; }
+  .arrow.fly-left  { transform: translate(-180%, -50%) scale(0.6); opacity: 0; }
+  .arrow.fly-right { transform: translate(  80%, -50%) scale(0.6); opacity: 0; }
+  .arrow.shake { animation: shake 0.22s ease-in-out; }
+  @keyframes shake {
+    0%,100% { transform: translate(-50%, -50%) rotate(0); }
+    25%     { transform: translate(-58%, -50%) rotate(-6deg); }
+    75%     { transform: translate(-42%, -50%) rotate(6deg); }
+  }
+  .arrow.pop {
+    animation: pop 0.18s ease-out;
+  }
+  @keyframes pop {
+    0% { transform: translate(-50%, -50%) scale(0.6); opacity: 0; }
+    100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  }
+
+  .ripple {
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+    opacity: 0.7;
+    width: 20px; height: 20px;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(circle, rgba(255,255,255,0.4), transparent 70%);
+    animation: ripple 0.5s ease-out forwards;
+  }
+  @keyframes ripple {
+    to { width: 280px; height: 280px; opacity: 0; }
+  }
+
+  .flash {
+    position: absolute; inset: 0;
+    pointer-events: none;
+    opacity: 0;
+  }
+  .flash.ok { background: radial-gradient(circle at center, rgba(63,185,80,0.35), transparent 60%); animation: flash 0.3s ease-out; }
+  .flash.bad { background: radial-gradient(circle at center, rgba(248,81,73,0.45), transparent 65%); animation: flash 0.35s ease-out; }
+  @keyframes flash {
+    0% { opacity: 1; } 100% { opacity: 0; }
+  }
+
+  .overlay {
+    position: absolute; inset: 0;
+    background: rgba(13,17,23,0.92);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center;
+    padding: 24px;
+    z-index: 50;
+    transition: opacity 0.25s;
+  }
+  .overlay.hide { opacity: 0; pointer-events: none; }
+  .overlay h2 {
+    font-size: 36px;
+    font-weight: 800;
+    background: linear-gradient(90deg, #58a6ff, #a371f7);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    margin-bottom: 8px;
+    letter-spacing: -0.02em;
+  }
+  .overlay p { color: #8b949e; font-size: 14px; max-width: 280px; line-height: 1.6; margin-bottom: 28px; }
+  .overlay .demo {
+    display: grid;
+    grid-template-columns: repeat(3, 48px);
+    grid-template-rows: repeat(3, 48px);
+    gap: 4px;
+    margin-bottom: 28px;
+    color: #58a6ff;
+  }
+  .overlay .demo div {
+    display: flex; align-items: center; justify-content: center;
+    font-size: 24px;
+  }
+  .overlay button {
+    background: linear-gradient(135deg, #58a6ff, #a371f7);
+    color: #0d1117;
+    border: none;
+    font-size: 17px;
+    font-weight: 700;
+    padding: 14px 36px;
+    border-radius: 999px;
+    cursor: pointer;
+    box-shadow: 0 6px 20px rgba(88,166,255,0.35);
+    transition: transform 0.1s;
+  }
+  .overlay button:active { transform: scale(0.96); }
+  .score-big {
+    font-size: 56px;
+    font-weight: 900;
+    color: #f0c674;
+    margin: 4px 0 4px;
+    line-height: 1;
+  }
+  .best-line {
+    color: #8b949e;
+    font-size: 13px;
+    margin-bottom: 24px;
+  }
+  .best-line b { color: #e6edf3; }
+  .new-best {
+    color: #f0c674;
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    margin-bottom: 6px;
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity: 0.6; } 50% { opacity: 1; }
+  }
+</style>
+</head>
+<body>
+<div class="top">
+  <a class="back" href="../../index.html">← 戻る</a>
+  <div class="stats">
+    <span>SCORE<b id="score">0</b></span>
+    <span>BEST<b id="best">0</b></span>
+  </div>
+</div>
+<div class="timebar-wrap"><div class="timebar" id="timebar"></div></div>
+<div id="stage">
+  <div class="combo hide" id="combo">COMBO<b id="comboNum">0</b></div>
+  <div class="flash" id="flash"></div>
+
+  <div class="overlay" id="startOverlay">
+    <h2>Arrow Burst</h2>
+    <p>矢印の向きにスワイプ！<br>速いほど時間が増える。</p>
+    <div class="demo">
+      <div></div><div>↑</div><div></div>
+      <div>←</div><div>·</div><div>→</div>
+      <div></div><div>↓</div><div></div>
+    </div>
+    <button id="startBtn">START</button>
+  </div>
+
+  <div class="overlay hide" id="endOverlay">
+    <div class="new-best hide" id="newBest">★ NEW BEST ★</div>
+    <p style="margin-bottom:0;">SCORE</p>
+    <div class="score-big" id="finalScore">0</div>
+    <div class="best-line">BEST <b id="finalBest">0</b></div>
+    <button id="retryBtn">もう一度</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  const stage = document.getElementById('stage');
+  const flash = document.getElementById('flash');
+  const timebar = document.getElementById('timebar');
+  const scoreEl = document.getElementById('score');
+  const bestEl = document.getElementById('best');
+  const comboBox = document.getElementById('combo');
+  const comboNum = document.getElementById('comboNum');
+  const startOverlay = document.getElementById('startOverlay');
+  const endOverlay = document.getElementById('endOverlay');
+  const startBtn = document.getElementById('startBtn');
+  const retryBtn = document.getElementById('retryBtn');
+  const finalScore = document.getElementById('finalScore');
+  const finalBest = document.getElementById('finalBest');
+  const newBest = document.getElementById('newBest');
+
+  const DIRS = ['up','down','left','right'];
+  const COLORS = ['#58a6ff','#a371f7','#f0c674','#3fb950','#ff7b72','#f778ba'];
+  const DIR_PATH = {
+    up:    'M50 8 L88 60 L62 60 L62 92 L38 92 L38 60 L12 60 Z',
+    down:  'M50 92 L88 40 L62 40 L62 8 L38 8 L38 40 L12 40 Z',
+    left:  'M8 50 L60 12 L60 38 L92 38 L92 62 L60 62 L60 88 Z',
+    right: 'M92 50 L40 12 L40 38 L8 38 L8 62 L40 62 L40 88 Z'
+  };
+
+  let state = {
+    playing: false,
+    score: 0,
+    combo: 0,
+    time: 1.0,         // 0..1
+    spawnTime: 0,
+    currentDir: null,
+    currentColor: null,
+    arrowEl: null,
+    locked: false,
+    best: parseInt(localStorage.getItem('arrowBurstBest') || '0', 10),
+    lastTs: 0,
+    rafId: 0,
+  };
+
+  bestEl.textContent = state.best;
+
+  function vibrate(ms) {
+    if (navigator.vibrate) try { navigator.vibrate(ms); } catch(e){}
+  }
+
+  function updateTimebar() {
+    const t = Math.max(0, Math.min(1, state.time));
+    timebar.style.transform = `scaleX(${t})`;
+    timebar.classList.toggle('warn', t < 0.25);
+  }
+
+  function spawnArrow() {
+    // Remove existing
+    if (state.arrowEl) state.arrowEl.remove();
+
+    const dir = DIRS[Math.floor(Math.random() * 4)];
+    const color = COLORS[Math.floor(Math.random() * COLORS.length)];
+    state.currentDir = dir;
+    state.currentColor = color;
+    state.spawnTime = performance.now();
+    state.locked = false;
+
+    const el = document.createElement('div');
+    el.className = 'arrow pop';
+    el.style.color = color;
+    el.innerHTML = `
+      <svg viewBox="0 0 100 100">
+        <path d="${DIR_PATH[dir]}" fill="${color}" stroke="rgba(255,255,255,0.15)" stroke-width="2"/>
+      </svg>
+    `;
+    stage.appendChild(el);
+    state.arrowEl = el;
+  }
+
+  function showFlash(kind) {
+    flash.className = 'flash ' + kind;
+    // restart animation
+    void flash.offsetWidth;
+  }
+
+  function updateCombo() {
+    if (state.combo >= 2) {
+      comboBox.classList.remove('hide');
+      comboNum.textContent = state.combo;
+    } else {
+      comboBox.classList.add('hide');
+    }
+  }
+
+  function correctSwipe(dir) {
+    if (!state.arrowEl || state.locked) return;
+    state.locked = true;
+    const el = state.arrowEl;
+    el.classList.remove('pop');
+    el.classList.add('fly-' + dir);
+
+    const reactionMs = performance.now() - state.spawnTime;
+    // faster = more time bonus and points
+    const speedBonus = Math.max(0, 1 - reactionMs / 1500); // 0..1
+    const timeBonus = 0.07 + speedBonus * 0.10;            // 0.07..0.17
+    state.time = Math.min(1, state.time + timeBonus);
+
+    state.combo += 1;
+    const comboMult = 1 + Math.min(state.combo, 20) * 0.1;
+    const points = Math.round((10 + speedBonus * 20) * comboMult);
+    state.score += points;
+    scoreEl.textContent = state.score;
+    updateCombo();
+    showFlash('ok');
+    vibrate(15);
+
+    setTimeout(() => {
+      if (state.playing) spawnArrow();
+    }, 90);
+  }
+
+  function wrongSwipe() {
+    if (!state.arrowEl || state.locked) return;
+    state.locked = true;
+    state.arrowEl.classList.add('shake');
+    state.time = Math.max(0, state.time - 0.18);
+    state.combo = 0;
+    updateCombo();
+    showFlash('bad');
+    vibrate([20, 40, 20]);
+
+    setTimeout(() => {
+      if (state.playing) {
+        state.arrowEl.classList.remove('shake');
+        state.locked = false;
+      }
+    }, 230);
+  }
+
+  function spawnRipple(x, y) {
+    const r = document.createElement('div');
+    r.className = 'ripple';
+    r.style.left = x + 'px';
+    r.style.top = y + 'px';
+    stage.appendChild(r);
+    setTimeout(() => r.remove(), 500);
+  }
+
+  // Swipe / tap detection
+  let touchStart = null;
+  function handleStart(x, y) {
+    touchStart = { x, y, t: performance.now() };
+  }
+  function handleEnd(x, y) {
+    if (!touchStart || !state.playing) { touchStart = null; return; }
+    const dx = x - touchStart.x;
+    const dy = y - touchStart.y;
+    const dist = Math.hypot(dx, dy);
+    const dt = performance.now() - touchStart.t;
+    touchStart = null;
+
+    // Tap = wrong (no direction) — only if strictly tap (very small movement)
+    if (dist < 24) {
+      // ignore taps so accidental taps don't kill the run
+      return;
+    }
+
+    spawnRipple(x, y);
+
+    let dir;
+    if (Math.abs(dx) > Math.abs(dy)) dir = dx > 0 ? 'right' : 'left';
+    else dir = dy > 0 ? 'down' : 'up';
+
+    if (dir === state.currentDir) correctSwipe(dir);
+    else wrongSwipe();
+  }
+
+  stage.addEventListener('touchstart', e => {
+    const t = e.changedTouches[0];
+    handleStart(t.clientX, t.clientY);
+  }, { passive: true });
+  stage.addEventListener('touchend', e => {
+    const t = e.changedTouches[0];
+    handleEnd(t.clientX, t.clientY);
+  }, { passive: true });
+
+  // Mouse fallback (desktop testing)
+  stage.addEventListener('mousedown', e => handleStart(e.clientX, e.clientY));
+  stage.addEventListener('mouseup', e => handleEnd(e.clientX, e.clientY));
+
+  function loop(ts) {
+    if (!state.playing) return;
+    if (!state.lastTs) state.lastTs = ts;
+    const dt = (ts - state.lastTs) / 1000;
+    state.lastTs = ts;
+
+    // Difficulty: drain rate ramps up with score
+    const drainRate = 0.085 + Math.min(state.score / 4000, 0.10); // ~12s base, scales
+    state.time -= drainRate * dt;
+    updateTimebar();
+
+    if (state.time <= 0) {
+      gameOver();
+      return;
+    }
+    state.rafId = requestAnimationFrame(loop);
+  }
+
+  function start() {
+    state.playing = true;
+    state.score = 0;
+    state.combo = 0;
+    state.time = 1.0;
+    state.lastTs = 0;
+    scoreEl.textContent = '0';
+    updateCombo();
+    updateTimebar();
+    startOverlay.classList.add('hide');
+    endOverlay.classList.add('hide');
+    spawnArrow();
+    state.rafId = requestAnimationFrame(loop);
+  }
+
+  function gameOver() {
+    state.playing = false;
+    cancelAnimationFrame(state.rafId);
+    if (state.arrowEl) {
+      state.arrowEl.style.opacity = '0.3';
+    }
+    let isNew = false;
+    if (state.score > state.best) {
+      state.best = state.score;
+      localStorage.setItem('arrowBurstBest', state.best);
+      bestEl.textContent = state.best;
+      isNew = true;
+    }
+    finalScore.textContent = state.score;
+    finalBest.textContent = state.best;
+    newBest.classList.toggle('hide', !isNew);
+    setTimeout(() => endOverlay.classList.remove('hide'), 350);
+    vibrate([60, 40, 80]);
+  }
+
+  startBtn.addEventListener('click', start);
+  retryBtn.addEventListener('click', () => {
+    if (state.arrowEl) state.arrowEl.remove();
+    start();
+  });
+
+  // Prevent scroll on iOS Safari
+  document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+})();
+</script>
+</body>
+</html>
