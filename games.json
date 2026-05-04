@@ -33,5 +33,12 @@
     "date": "2026-05-03",
     "description": "現れた矢印の方向に素早くスワイプ！速いほど時間ボーナス、コンボで高得点。時間切れまでにどこまで稼げる？",
     "tags": ["swipe", "reflex", "action"]
+  },
+  {
+    "slug": "2026-05-04-tap-frenzy",
+    "title": "Tap Frenzy",
+    "date": "2026-05-04",
+    "description": "減り続けるエネルギーを連打で支える持久戦。時間が経つほどドレインが加速、何秒もたせられる？",
+    "tags": ["tap", "rapid", "survival"]
   }
 ]

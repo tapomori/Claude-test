@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Tap Frenzy</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: #070912; color: #e6edf3;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", system-ui, sans-serif;
+    touch-action: manipulation;
+    user-select: none; -webkit-user-select: none;
+    overscroll-behavior: none;
+  }
+  #game {
+    position: fixed; inset: 0;
+    width: 100vw; height: 100vh;
+    overflow: hidden;
+  }
+  canvas { display: block; position: absolute; inset: 0; }
+
+  .ui {
+    position: absolute;
+    top: env(safe-area-inset-top, 0); left: 0; right: 0;
+    padding: 14px 16px;
+    pointer-events: none;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    z-index: 5;
+  }
+  .back {
+    pointer-events: auto;
+    color: #c9d1d9; text-decoration: none;
+    font-size: 13px; font-weight: 500;
+    background: rgba(22, 27, 34, 0.65);
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid #30363d;
+    backdrop-filter: blur(6px);
+  }
+  .back:active { background: rgba(48, 54, 61, 0.8); }
+
+  .stats {
+    text-align: right;
+  }
+  .time {
+    font-size: 36px; font-weight: 800; letter-spacing: -0.03em;
+    line-height: 1;
+    text-shadow: 0 2px 16px rgba(255, 100, 80, 0.4);
+    font-variant-numeric: tabular-nums;
+  }
+  .tps {
+    font-size: 11px; color: #8b949e; margin-top: 4px;
+    letter-spacing: 0.15em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .energy-wrap {
+    position: absolute;
+    top: calc(env(safe-area-inset-top, 0) + 78px);
+    left: 24px; right: 24px;
+    height: 14px;
+    background: rgba(22, 27, 34, 0.65);
+    border: 1px solid #30363d;
+    border-radius: 999px;
+    overflow: hidden;
+    z-index: 5;
+  }
+  .energy {
+    height: 100%; width: 100%;
+    background: linear-gradient(90deg, #ff5f6d 0%, #ffd33d 50%, #34d399 100%);
+    transform-origin: left center;
+    transition: transform 0.05s linear;
+    border-radius: 999px;
+    box-shadow: 0 0 14px rgba(255, 211, 61, 0.4);
+  }
+  .energy-wrap.low .energy {
+    background: linear-gradient(90deg, #ff3b3b 0%, #ff5f6d 100%);
+    animation: pulseRed 0.4s infinite alternate;
+  }
+  @keyframes pulseRed {
+    from { box-shadow: 0 0 8px rgba(255, 59, 59, 0.4); }
+    to { box-shadow: 0 0 22px rgba(255, 59, 59, 0.9); }
+  }
+
+  .core-hint {
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 13px; color: #8b949e;
+    letter-spacing: 0.25em;
+    pointer-events: none;
+    z-index: 4;
+    animation: fade 1.4s ease-in-out infinite;
+  }
+  @keyframes fade { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+  .hint-bottom {
+    position: absolute;
+    bottom: calc(env(safe-area-inset-bottom, 0) + 24px);
+    left: 0; right: 0;
+    text-align: center; font-size: 12px; color: #6e7681;
+    z-index: 4;
+    letter-spacing: 0.18em;
+    pointer-events: none;
+  }
+
+  .gameover {
+    position: absolute; inset: 0;
+    background: rgba(7, 9, 18, 0.94);
+    backdrop-filter: blur(8px);
+    display: none;
+    flex-direction: column; align-items: center; justify-content: center;
+    z-index: 10;
+    padding: 24px;
+  }
+  .gameover.show {
+    display: flex;
+    animation: pop 0.3s ease-out;
+  }
+  @keyframes pop { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+  .go-title { font-size: 13px; font-weight: 600; color: #8b949e; letter-spacing: 0.25em; margin-bottom: 12px; }
+  .go-score {
+    font-size: 78px; font-weight: 800; line-height: 1; margin-bottom: 4px;
+    background: linear-gradient(135deg, #ffd33d 0%, #ff5f6d 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    font-variant-numeric: tabular-nums;
+  }
+  .go-unit { font-size: 14px; color: #8b949e; letter-spacing: 0.2em; margin-bottom: 18px; }
+  .go-row {
+    display: flex; gap: 28px; margin-bottom: 32px;
+  }
+  .go-stat {
+    text-align: center;
+  }
+  .go-stat-num { font-size: 22px; font-weight: 700; color: #c9d1d9; font-variant-numeric: tabular-nums; }
+  .go-stat-lbl { font-size: 10px; color: #8b949e; letter-spacing: 0.2em; margin-top: 2px; }
+  .go-best b { color: #ffd33d; font-weight: 700; }
+  .btn {
+    padding: 14px 40px; font-size: 16px; font-weight: 600;
+    background: #ff5f6d; color: white; border: none; border-radius: 999px;
+    cursor: pointer; pointer-events: auto;
+    transition: transform 0.1s, background 0.1s;
+  }
+  .btn:active { transform: scale(0.96); background: #e04451; }
+</style>
+</head>
+<body>
+<div id="game">
+  <canvas id="c"></canvas>
+
+  <div class="ui">
+    <a class="back" href="../../index.html">← 戻る</a>
+    <div class="stats">
+      <div class="time" id="time">0.0</div>
+      <div class="tps" id="tps">0 TAPS/S</div>
+    </div>
+  </div>
+
+  <div class="energy-wrap" id="energyWrap">
+    <div class="energy" id="energy"></div>
+  </div>
+
+  <div class="core-hint" id="hint">TAP ANYWHERE</div>
+  <div class="hint-bottom">連打して エネルギーを保て</div>
+
+  <div class="gameover" id="go">
+    <div class="go-title">DRAINED</div>
+    <div class="go-score" id="goScore">0.0</div>
+    <div class="go-unit">SECONDS</div>
+    <div class="go-row">
+      <div class="go-stat">
+        <div class="go-stat-num" id="goTaps">0</div>
+        <div class="go-stat-lbl">TAPS</div>
+      </div>
+      <div class="go-stat">
+        <div class="go-stat-num" id="goPeak">0</div>
+        <div class="go-stat-lbl">PEAK TPS</div>
+      </div>
+      <div class="go-stat">
+        <div class="go-stat-num" id="goBest">0.0</div>
+        <div class="go-stat-lbl">BEST</div>
+      </div>
+    </div>
+    <button class="btn" id="retry">もう一度</button>
+  </div>
+</div>
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const energyEl = document.getElementById('energy');
+  const energyWrap = document.getElementById('energyWrap');
+  const timeEl = document.getElementById('time');
+  const tpsEl = document.getElementById('tps');
+  const hintEl = document.getElementById('hint');
+  const goEl = document.getElementById('go');
+  const goScoreEl = document.getElementById('goScore');
+  const goTapsEl = document.getElementById('goTaps');
+  const goPeakEl = document.getElementById('goPeak');
+  const goBestEl = document.getElementById('goBest');
+  const retryBtn = document.getElementById('retry');
+
+  let W, H, dpr;
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = Math.floor(W * dpr);
+    canvas.height = Math.floor(H * dpr);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // Game state
+  let energy, lastT, started, gameOver;
+  let elapsed, totalTaps, tapTimestamps, peakTps;
+  let core, ripples, particles;
+  let best = parseFloat(localStorage.getItem('tapFrenzyBest') || '0');
+
+  function reset() {
+    energy = 1.0; // 0..1
+    lastT = 0;
+    started = false;
+    gameOver = false;
+    elapsed = 0;
+    totalTaps = 0;
+    tapTimestamps = [];
+    peakTps = 0;
+    core = { x: W / 2, y: H / 2, r: Math.min(W, H) * 0.18, pulse: 0, hue: 50 };
+    ripples = [];
+    particles = [];
+    energyEl.style.transform = 'scaleX(1)';
+    energyWrap.classList.remove('low');
+    timeEl.textContent = '0.0';
+    tpsEl.textContent = '0 TAPS/S';
+    hintEl.style.display = 'block';
+    goEl.classList.remove('show');
+  }
+
+  function endGame() {
+    if (gameOver) return;
+    gameOver = true;
+    if (elapsed > best) {
+      best = elapsed;
+      localStorage.setItem('tapFrenzyBest', best.toFixed(2));
+    }
+    goScoreEl.textContent = elapsed.toFixed(1);
+    goTapsEl.textContent = totalTaps;
+    goPeakEl.textContent = peakTps.toFixed(1);
+    goBestEl.textContent = best.toFixed(1);
+    if (navigator.vibrate) navigator.vibrate([60, 100, 60]);
+    setTimeout(() => goEl.classList.add('show'), 700);
+  }
+
+  function tapAt(x, y) {
+    if (gameOver) return;
+    if (!started) {
+      started = true;
+      hintEl.style.display = 'none';
+      lastT = performance.now();
+    }
+    totalTaps++;
+    const now = performance.now();
+    tapTimestamps.push(now);
+    // refill amount: smaller as time goes on (harder), but each tap matters
+    const refill = 0.06;
+    energy = Math.min(1, energy + refill);
+
+    // visual ripple
+    ripples.push({ x, y, r: 6, maxR: 90 + Math.random() * 40, life: 1, hue: 40 + Math.random() * 30 });
+
+    // particles burst near core if tapped near it
+    const dx = x - core.x, dy = y - core.y;
+    const dToCore = Math.hypot(dx, dy);
+    if (dToCore < core.r * 1.5) {
+      const n = 4 + Math.floor(Math.random() * 4);
+      for (let i = 0; i < n; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const v = 1.5 + Math.random() * 2.5;
+        particles.push({
+          x: core.x + Math.cos(a) * core.r * 0.9,
+          y: core.y + Math.sin(a) * core.r * 0.9,
+          vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+          life: 1, decay: 0.02 + Math.random() * 0.02,
+          size: 2 + Math.random() * 3, hue: 40 + Math.random() * 40
+        });
+      }
+    }
+
+    core.pulse = 1;
+
+    if (navigator.vibrate) navigator.vibrate(8);
+  }
+
+  function loop(t) {
+    if (!lastT) lastT = t;
+    const dt = Math.min(0.05, (t - lastT) / 1000);
+    lastT = t;
+
+    if (started && !gameOver) {
+      elapsed += dt;
+      // drain rate increases over time
+      // base 0.18/s, +0.018/s per second elapsed, capped 0.95/s
+      const drainRate = Math.min(0.95, 0.18 + elapsed * 0.022);
+      energy -= drainRate * dt;
+      if (energy <= 0) {
+        energy = 0;
+        endGame();
+      }
+    }
+
+    energyEl.style.transform = `scaleX(${Math.max(0, energy).toFixed(3)})`;
+    if (energy < 0.25) energyWrap.classList.add('low');
+    else energyWrap.classList.remove('low');
+
+    // taps per second (rolling 1s)
+    const cutoff = performance.now() - 1000;
+    while (tapTimestamps.length && tapTimestamps[0] < cutoff) tapTimestamps.shift();
+    const tps = tapTimestamps.length;
+    if (tps > peakTps) peakTps = tps;
+
+    if (started && !gameOver) {
+      timeEl.textContent = elapsed.toFixed(1);
+      tpsEl.textContent = `${tps} TAPS/S`;
+    }
+
+    // core shifts hue based on energy
+    core.hue = 0 + energy * 130; // red -> green
+    core.pulse *= 0.88;
+
+    // draw
+    const bg = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, Math.max(W, H) * 0.7);
+    const lowFlash = energy < 0.2 ? Math.sin(t / 80) * 0.15 + 0.15 : 0;
+    bg.addColorStop(0, `rgba(${20 + lowFlash * 200}, ${15}, ${28}, 1)`);
+    bg.addColorStop(1, '#050811');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    // ripples
+    for (const r of ripples) {
+      r.r += (r.maxR - r.r) * 0.08;
+      r.life -= 0.025;
+      ctx.strokeStyle = `hsla(${r.hue}, 90%, 65%, ${Math.max(0, r.life) * 0.7})`;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ripples = ripples.filter(r => r.life > 0);
+
+    // core
+    const cx = core.x, cy = core.y;
+    const baseR = core.r;
+    const pulseR = baseR * (1 + core.pulse * 0.18 + Math.sin(t / 220) * 0.04);
+    // outer glow
+    const g = ctx.createRadialGradient(cx, cy, baseR * 0.2, cx, cy, pulseR * 1.6);
+    g.addColorStop(0, `hsla(${core.hue}, 90%, 70%, 0.55)`);
+    g.addColorStop(1, `hsla(${core.hue}, 90%, 50%, 0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(cx, cy, pulseR * 1.6, 0, Math.PI * 2);
+    ctx.fill();
+    // core fill
+    const cg = ctx.createRadialGradient(cx, cy - pulseR * 0.3, pulseR * 0.1, cx, cy, pulseR);
+    cg.addColorStop(0, `hsla(${core.hue}, 100%, 88%, 1)`);
+    cg.addColorStop(0.6, `hsla(${core.hue}, 90%, 60%, 1)`);
+    cg.addColorStop(1, `hsla(${core.hue}, 80%, 36%, 1)`);
+    ctx.fillStyle = cg;
+    ctx.beginPath();
+    ctx.arc(cx, cy, pulseR, 0, Math.PI * 2);
+    ctx.fill();
+    // core ring
+    ctx.strokeStyle = `hsla(${core.hue}, 95%, 80%, 0.5)`;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // energy text on core
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.font = '700 28px -apple-system, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(Math.round(energy * 100) + '%', cx, cy);
+
+    // particles
+    for (const p of particles) {
+      p.vy += 0.06;
+      p.x += p.vx;
+      p.y += p.vy;
+      p.life -= p.decay;
+      ctx.fillStyle = `hsla(${p.hue}, 90%, 70%, ${Math.max(0, p.life)})`;
+      ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    }
+    particles = particles.filter(p => p.life > 0);
+
+    requestAnimationFrame(loop);
+  }
+
+  function handle(e, isTouch) {
+    if (e.target.closest('.back') || e.target.closest('.btn')) return;
+    e.preventDefault();
+    if (gameOver) return;
+    if (isTouch) {
+      for (const t of e.changedTouches) {
+        tapAt(t.clientX, t.clientY);
+      }
+    } else {
+      tapAt(e.clientX, e.clientY);
+    }
+  }
+
+  document.addEventListener('touchstart', e => handle(e, true), { passive: false });
+  let mouseActive = false;
+  document.addEventListener('mousedown', e => { mouseActive = true; handle(e, false); });
+  document.addEventListener('mouseup', () => { mouseActive = false; });
+
+  retryBtn.addEventListener('click', () => reset());
+
+  reset();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
