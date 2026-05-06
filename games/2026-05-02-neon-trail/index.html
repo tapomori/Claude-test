@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a18">
+<title>Neon Trail</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: #0a0a18; color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", system-ui, sans-serif;
+    touch-action: manipulation;
+    user-select: none; -webkit-user-select: none;
+    overscroll-behavior: none;
+  }
+  #wrap { position: fixed; inset: 0; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  .hud {
+    position: absolute; top: 0; left: 0; right: 0;
+    padding: calc(env(safe-area-inset-top, 0px) + 14px) 18px 0;
+    display: flex; justify-content: space-between; align-items: center;
+    pointer-events: none;
+    font-weight: 700; font-size: 17px;
+    text-shadow: 0 2px 8px rgba(0,0,0,.6);
+  }
+  .score { color: #ffe45e; }
+  .time { color: #5ee1ff; }
+  .back {
+    position: absolute;
+    top: calc(env(safe-area-inset-top, 0px) + 12px);
+    right: 14px;
+    color: #c9d1d9; opacity: .7;
+    text-decoration: none;
+    font-size: 13px;
+    padding: 6px 10px;
+    pointer-events: auto;
+    z-index: 10;
+  }
+  .back:active { opacity: 1; }
+  .overlay {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: rgba(10, 10, 24, .72);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    padding: 24px; text-align: center;
+    z-index: 5;
+  }
+  .overlay h1 {
+    font-size: 40px; font-weight: 800; margin-bottom: 18px;
+    background: linear-gradient(135deg, #ff5ee1, #5ee1ff);
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent;
+    letter-spacing: -.02em;
+  }
+  .overlay p { margin-bottom: 28px; opacity: .85; max-width: 280px; line-height: 1.6; font-size: 15px; }
+  .score-big { font-size: 56px; font-weight: 800; color: #ffe45e; margin: 8px 0 28px; text-shadow: 0 0 24px rgba(255, 228, 94, .5); }
+  .btn {
+    padding: 16px 44px; font-size: 17px; font-weight: 700;
+    border: none; border-radius: 999px;
+    background: linear-gradient(135deg, #ff5ee1, #5ee1ff);
+    color: #0a0a18;
+    box-shadow: 0 6px 24px rgba(255, 94, 225, .35);
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .btn:active { transform: scale(.96); }
+  .hidden { display: none !important; }
+  .hint {
+    position: absolute; bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
+    left: 0; right: 0; text-align: center;
+    font-size: 13px; opacity: .5;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <div class="hud">
+    <span class="time">⏱ <span id="time">30</span></span>
+    <span class="score">★ <span id="score">0</span></span>
+  </div>
+  <a href="../../index.html" class="back">← 戻る</a>
+
+  <div id="start" class="overlay">
+    <h1>Neon Trail</h1>
+    <p>指でなぞって光る星を集めよう。<br>赤い敵に触れたらアウト。</p>
+    <button class="btn" id="startBtn">START</button>
+  </div>
+
+  <div id="end" class="overlay hidden">
+    <h1 id="endTitle">TIME UP</h1>
+    <div class="score-big" id="finalScore">0</div>
+    <button class="btn" id="restartBtn">もう一度</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  let W = 0, H = 0;
+
+  function resize() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = Math.floor(W * dpr);
+    canvas.height = Math.floor(H * dpr);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  const player = { x: 0, y: 0, r: 13, trail: [] };
+  let stars = [];
+  let enemies = [];
+  let particles = [];
+  let score = 0;
+  let timeLeft = 30;
+  let running = false;
+  let last = 0;
+  let touching = false;
+  let tx = 0, ty = 0;
+  let elapsed = 0;
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+
+  function spawnStar() {
+    const margin = 50;
+    stars.push({
+      x: rand(margin, W - margin),
+      y: rand(margin + 60, H - margin),
+      r: 11,
+      pulse: Math.random() * Math.PI * 2,
+      born: 0
+    });
+  }
+
+  function spawnEnemy() {
+    const side = Math.floor(Math.random() * 4);
+    const speed = rand(90, 150);
+    const angle = rand(-0.4, 0.4);
+    let x, y, vx, vy;
+    if (side === 0) { x = rand(0, W); y = -20; vx = Math.sin(angle) * speed; vy = Math.cos(angle) * speed; }
+    else if (side === 1) { x = W + 20; y = rand(0, H); vx = -Math.cos(angle) * speed; vy = Math.sin(angle) * speed; }
+    else if (side === 2) { x = rand(0, W); y = H + 20; vx = Math.sin(angle) * speed; vy = -Math.cos(angle) * speed; }
+    else { x = -20; y = rand(0, H); vx = Math.cos(angle) * speed; vy = Math.sin(angle) * speed; }
+    enemies.push({ x, y, vx, vy, r: 15, born: 0 });
+  }
+
+  function burst(x, y, color, count) {
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = rand(80, 240);
+      particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 1, color });
+    }
+  }
+
+  function reset() {
+    player.x = W / 2;
+    player.y = H * 0.7;
+    player.trail = [];
+    stars = [];
+    enemies = [];
+    particles = [];
+    score = 0;
+    timeLeft = 30;
+    elapsed = 0;
+    for (let i = 0; i < 3; i++) spawnStar();
+    document.getElementById('score').textContent = '0';
+    document.getElementById('time').textContent = '30';
+  }
+
+  function start() {
+    reset();
+    document.getElementById('start').classList.add('hidden');
+    document.getElementById('end').classList.add('hidden');
+    running = true;
+    last = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  function gameOver(title) {
+    running = false;
+    burst(player.x, player.y, '#ff3a6e', 30);
+    document.getElementById('endTitle').textContent = title;
+    document.getElementById('finalScore').textContent = score;
+    document.getElementById('end').classList.remove('hidden');
+    if (navigator.vibrate) navigator.vibrate([80, 50, 80]);
+  }
+
+  function loop(t) {
+    if (!running) { draw(); return; }
+    const dt = Math.min((t - last) / 1000, 0.05);
+    last = t;
+    elapsed += dt;
+
+    // Player follows touch
+    if (touching) {
+      const dx = tx - player.x, dy = ty - player.y;
+      const d = Math.hypot(dx, dy);
+      if (d > 0.5) {
+        const speed = Math.min(d * 14, 1100);
+        player.x += (dx / d) * speed * dt;
+        player.y += (dy / d) * speed * dt;
+      }
+    }
+
+    // Trail
+    player.trail.push({ x: player.x, y: player.y, life: 1 });
+    if (player.trail.length > 24) player.trail.shift();
+    for (const p of player.trail) p.life -= dt * 2.2;
+
+    // Time
+    timeLeft -= dt;
+    document.getElementById('time').textContent = Math.max(0, Math.ceil(timeLeft));
+    if (timeLeft <= 0) {
+      gameOver('TIME UP!');
+      return;
+    }
+
+    // Stars
+    for (const s of stars) {
+      s.pulse += dt * 4;
+      s.born = Math.min(1, s.born + dt * 4);
+    }
+    for (let i = stars.length - 1; i >= 0; i--) {
+      const s = stars[i];
+      const dx = s.x - player.x, dy = s.y - player.y;
+      const rr = (s.r + player.r);
+      if (dx * dx + dy * dy < rr * rr) {
+        burst(s.x, s.y, '#ffe45e', 14);
+        stars.splice(i, 1);
+        score++;
+        document.getElementById('score').textContent = score;
+        spawnStar();
+        // Difficulty: more enemies as score climbs
+        if (score === 1 || score % 4 === 0) spawnEnemy();
+        if (navigator.vibrate) navigator.vibrate(18);
+      }
+    }
+
+    // Enemies (bounce)
+    for (const e of enemies) {
+      e.born = Math.min(1, e.born + dt * 2);
+      e.x += e.vx * dt;
+      e.y += e.vy * dt;
+      if (e.x < e.r) { e.x = e.r; e.vx = Math.abs(e.vx); }
+      if (e.x > W - e.r) { e.x = W - e.r; e.vx = -Math.abs(e.vx); }
+      if (e.y < e.r + 50) { e.y = e.r + 50; e.vy = Math.abs(e.vy); }
+      if (e.y > H - e.r) { e.y = H - e.r; e.vy = -Math.abs(e.vy); }
+
+      const dx = e.x - player.x, dy = e.y - player.y;
+      const rr = (e.r + player.r) * 0.85;
+      if (e.born > 0.5 && dx * dx + dy * dy < rr * rr) {
+        gameOver('CRASH!');
+        return;
+      }
+    }
+
+    // Particles
+    for (const p of particles) {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= 0.92;
+      p.vy *= 0.92;
+      p.life -= dt * 1.6;
+    }
+    particles = particles.filter(p => p.life > 0);
+
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function draw() {
+    // BG
+    ctx.fillStyle = '#0a0a18';
+    ctx.fillRect(0, 0, W, H);
+
+    // Subtle grid
+    ctx.strokeStyle = 'rgba(94, 225, 255, 0.05)';
+    ctx.lineWidth = 1;
+    const grid = 44;
+    const off = (elapsed * 12) % grid;
+    ctx.beginPath();
+    for (let x = -off; x < W; x += grid) {
+      ctx.moveTo(x, 0); ctx.lineTo(x, H);
+    }
+    for (let y = -off; y < H; y += grid) {
+      ctx.moveTo(0, y); ctx.lineTo(W, y);
+    }
+    ctx.stroke();
+
+    // Trail
+    for (let i = 0; i < player.trail.length; i++) {
+      const p = player.trail[i];
+      if (p.life <= 0) continue;
+      const a = p.life * (i / player.trail.length) * 0.5;
+      ctx.fillStyle = `rgba(94, 225, 255, ${a})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, player.r * (0.4 + p.life * 0.6), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Particles
+    for (const p of particles) {
+      const a = Math.max(0, p.life);
+      ctx.fillStyle = p.color.replace(')', `, ${a})`).replace('rgb', 'rgba').replace('#', '');
+      // simpler: hex+alpha via global alpha
+      ctx.globalAlpha = a;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 3 * a + 1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Stars
+    for (const s of stars) {
+      const pulse = 1 + Math.sin(s.pulse) * 0.18;
+      const r = s.r * pulse * (0.3 + s.born * 0.7);
+      ctx.shadowColor = '#ffe45e';
+      ctx.shadowBlur = 22;
+      ctx.fillStyle = '#ffe45e';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#fff8c8';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r * 0.45, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    // Enemies
+    for (const e of enemies) {
+      const r = e.r * (0.4 + e.born * 0.6);
+      ctx.shadowColor = '#ff3a6e';
+      ctx.shadowBlur = 18;
+      ctx.fillStyle = e.born < 0.5 ? 'rgba(255, 58, 110, 0.5)' : '#ff3a6e';
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.globalAlpha = 0.6;
+      ctx.beginPath();
+      ctx.arc(e.x - r * 0.3, e.y - r * 0.3, r * 0.25, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.shadowBlur = 0;
+    }
+
+    // Player
+    ctx.shadowColor = '#5ee1ff';
+    ctx.shadowBlur = 28;
+    ctx.fillStyle = '#5ee1ff';
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, player.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, player.r * 0.45, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  function getPos(e) {
+    const t = e.touches && e.touches[0] ? e.touches[0] : e;
+    return { x: t.clientX, y: t.clientY };
+  }
+  function onStart(e) {
+    e.preventDefault();
+    const p = getPos(e);
+    touching = true; tx = p.x; ty = p.y;
+  }
+  function onMove(e) {
+    if (!touching) return;
+    e.preventDefault();
+    const p = getPos(e);
+    tx = p.x; ty = p.y;
+  }
+  function onEnd(e) {
+    e.preventDefault();
+    touching = false;
+  }
+  canvas.addEventListener('touchstart', onStart, { passive: false });
+  canvas.addEventListener('touchmove', onMove, { passive: false });
+  canvas.addEventListener('touchend', onEnd, { passive: false });
+  canvas.addEventListener('touchcancel', onEnd, { passive: false });
+  canvas.addEventListener('mousedown', onStart);
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onEnd);
+
+  document.getElementById('startBtn').addEventListener('click', start);
+  document.getElementById('restartBtn').addEventListener('click', start);
+
+  reset();
+  draw();
+})();
+</script>
+</body>
+</html>

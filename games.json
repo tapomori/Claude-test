@@ -14,6 +14,34 @@
     "tags": ["timing", "tap", "stack"]
   },
   {
+    "slug": "2026-05-02-neon-trail",
+    "title": "Neon Trail",
+    "date": "2026-05-02",
+    "description": "指でなぞって光る星を集めよう。バウンドする赤い敵に触れたらアウト。30秒で何個取れる？",
+    "tags": ["swipe", "drag", "dodge", "arcade"]
+  },
+  {
+    "slug": "2026-05-03-color-echo",
+    "title": "Color Echo",
+    "date": "2026-05-03",
+    "description": "光った色の順番を覚えて、同じ順にタップで再現。ステージごとに1色ずつ伸びていく王道メモリーゲーム。",
+    "tags": ["memory", "tap", "sequence"]
+  },
+  {
+    "slug": "2026-05-03-arrow-burst",
+    "title": "Arrow Burst",
+    "date": "2026-05-03",
+    "description": "現れた矢印の方向に素早くスワイプ！速いほど時間ボーナス、コンボで高得点。時間切れまでにどこまで稼げる？",
+    "tags": ["swipe", "reflex", "action"]
+  },
+  {
+    "slug": "2026-05-04-tap-frenzy",
+    "title": "Tap Frenzy",
+    "date": "2026-05-04",
+    "description": "減り続けるエネルギーを連打で支える持久戦。時間が経つほどドレインが加速、何秒もたせられる？",
+    "tags": ["tap", "rapid", "survival"]
+  },
+  {
     "slug": "2026-05-05-pulse-echo",
     "title": "Pulse Echo",
     "date": "2026-05-05",

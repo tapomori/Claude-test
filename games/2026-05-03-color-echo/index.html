@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Color Echo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: #07090f;
+    color: #e6edf3;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", system-ui, sans-serif;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px 8px;
+    flex-shrink: 0;
+  }
+  .back {
+    color: #8b949e;
+    text-decoration: none;
+    font-size: 14px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.04);
+  }
+  .back:active { background: rgba(255,255,255,0.1); }
+  .stats {
+    display: flex;
+    gap: 14px;
+    font-size: 13px;
+    color: #8b949e;
+  }
+  .stats b { color: #e6edf3; font-weight: 700; margin-left: 4px; }
+
+  .stage {
+    flex: 1;
+    position: relative;
+    padding: 12px 16px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .grid {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    max-width: min(92vw, 64dvh);
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 14px;
+    position: relative;
+  }
+  .tile {
+    border-radius: 22px;
+    position: relative;
+    transition: transform 0.08s ease, filter 0.18s ease, box-shadow 0.2s ease;
+    cursor: pointer;
+    overflow: hidden;
+    filter: brightness(0.55) saturate(0.8);
+  }
+  .tile::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: radial-gradient(circle at 30% 25%, rgba(255,255,255,0.35), transparent 55%);
+    opacity: 0.5;
+    pointer-events: none;
+  }
+  .tile.t0 { background: #ff3b5c; }
+  .tile.t1 { background: #2bd6ff; }
+  .tile.t2 { background: #ffc12e; }
+  .tile.t3 { background: #34e07a; }
+
+  .tile.lit {
+    filter: brightness(1.4) saturate(1.2);
+    transform: scale(1.02);
+  }
+  .tile.t0.lit { box-shadow: 0 0 50px 6px rgba(255, 59, 92, 0.85), inset 0 0 30px rgba(255,255,255,0.3); }
+  .tile.t1.lit { box-shadow: 0 0 50px 6px rgba(43, 214, 255, 0.85), inset 0 0 30px rgba(255,255,255,0.3); }
+  .tile.t2.lit { box-shadow: 0 0 50px 6px rgba(255, 193, 46, 0.85), inset 0 0 30px rgba(255,255,255,0.3); }
+  .tile.t3.lit { box-shadow: 0 0 50px 6px rgba(52, 224, 122, 0.85), inset 0 0 30px rgba(255,255,255,0.3); }
+
+  .tile.shake { animation: shake 0.4s ease; }
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-8px); }
+    40% { transform: translateX(8px); }
+    60% { transform: translateX(-6px); }
+    80% { transform: translateX(6px); }
+  }
+
+  .center {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+  .badge {
+    background: rgba(7, 9, 15, 0.78);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,255,255,0.08);
+    color: #e6edf3;
+    padding: 18px 26px;
+    border-radius: 18px;
+    text-align: center;
+    pointer-events: auto;
+    min-width: 220px;
+  }
+  .badge h2 { font-size: 22px; font-weight: 800; letter-spacing: -0.01em; }
+  .badge p { font-size: 13px; color: #8b949e; margin-top: 8px; line-height: 1.5; }
+  .badge .level-num {
+    font-size: 56px;
+    font-weight: 900;
+    letter-spacing: -0.04em;
+    background: linear-gradient(135deg, #ff3b5c, #2bd6ff 50%, #34e07a);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    line-height: 1;
+  }
+  .badge button {
+    margin-top: 14px;
+    background: #e6edf3;
+    color: #07090f;
+    border: none;
+    padding: 12px 22px;
+    border-radius: 999px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .badge button:active { transform: scale(0.96); }
+
+  .status {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 12px;
+    color: #8b949e;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    pointer-events: none;
+  }
+  .status.active { color: #2bd6ff; }
+  .status.input { color: #34e07a; }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <a class="back" href="../../index.html">← 戻る</a>
+    <div class="stats">
+      <span>Lv<b id="lvLabel">1</b></span>
+      <span>Best<b id="bestLabel">0</b></span>
+    </div>
+  </div>
+  <div class="stage">
+    <div class="grid" id="grid">
+      <div class="tile t0" data-i="0"></div>
+      <div class="tile t1" data-i="1"></div>
+      <div class="tile t2" data-i="2"></div>
+      <div class="tile t3" data-i="3"></div>
+      <div class="status" id="status"></div>
+      <div class="center" id="center">
+        <div class="badge" id="badge">
+          <h2>Color Echo</h2>
+          <p>光った順番に同じ色をタップ。<br>ステージごとに1色ずつ伸びていく。</p>
+          <button id="startBtn">スタート</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const tiles = [...document.querySelectorAll('.tile')];
+  const lvLabel = document.getElementById('lvLabel');
+  const bestLabel = document.getElementById('bestLabel');
+  const statusEl = document.getElementById('status');
+  const center = document.getElementById('center');
+  const badge = document.getElementById('badge');
+  const startBtn = document.getElementById('startBtn');
+
+  const STORAGE_KEY = 'color-echo-best';
+  let best = parseInt(localStorage.getItem(STORAGE_KEY) || '0', 10);
+  bestLabel.textContent = best;
+
+  let sequence = [];
+  let inputIndex = 0;
+  let level = 1;
+  let mode = 'idle'; // idle | showing | input | over
+  let audioCtx = null;
+
+  const FREQS = [262, 392, 330, 523]; // C, G, E, C5
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (Ctx) audioCtx = new Ctx();
+      } catch (e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  function beep(i, dur = 0.28) {
+    if (!audioCtx) return;
+    const now = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = FREQS[i] || 262;
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.18, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + dur + 0.05);
+  }
+
+  function buzz(ms) {
+    if (navigator.vibrate) navigator.vibrate(ms);
+  }
+
+  function lightTile(i, hold) {
+    return new Promise(res => {
+      const t = tiles[i];
+      t.classList.add('lit');
+      beep(i, hold / 1000);
+      setTimeout(() => {
+        t.classList.remove('lit');
+        setTimeout(res, Math.max(80, hold * 0.35));
+      }, hold);
+    });
+  }
+
+  function setStatus(text, cls) {
+    statusEl.textContent = text || '';
+    statusEl.className = 'status' + (cls ? ' ' + cls : '');
+  }
+
+  function showBadge(html) {
+    badge.innerHTML = html;
+    center.classList.remove('hidden');
+  }
+  function hideBadge() {
+    center.classList.add('hidden');
+  }
+
+  async function playSequence() {
+    mode = 'showing';
+    setStatus('みているだけ', 'active');
+    hideBadge();
+    // brief pause before sequence
+    await wait(500);
+    const speed = Math.max(280, 620 - level * 18);
+    for (let i = 0; i < sequence.length; i++) {
+      await lightTile(sequence[i], speed);
+    }
+    mode = 'input';
+    inputIndex = 0;
+    setStatus('あなたの番', 'input');
+  }
+
+  function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  function nextLevel() {
+    sequence.push(Math.floor(Math.random() * 4));
+    lvLabel.textContent = level;
+    playSequence();
+  }
+
+  function startGame() {
+    ensureAudio();
+    sequence = [];
+    level = 1;
+    nextLevel();
+  }
+
+  function gameOver(wrongTile) {
+    mode = 'over';
+    setStatus('');
+    buzz([60, 40, 120]);
+    if (wrongTile != null) {
+      tiles[wrongTile].classList.add('shake');
+      setTimeout(() => tiles[wrongTile].classList.remove('shake'), 500);
+    }
+    const score = level - 1;
+    if (score > best) {
+      best = score;
+      localStorage.setItem(STORAGE_KEY, best);
+      bestLabel.textContent = best;
+    }
+    setTimeout(() => {
+      showBadge(`
+        <h2>ミス！</h2>
+        <div class="level-num">${score}</div>
+        <p>クリアステージ ／ ベスト ${best}</p>
+        <button id="startBtn">もう一度</button>
+      `);
+      document.getElementById('startBtn').addEventListener('click', startGame, { once: true });
+    }, 600);
+  }
+
+  async function handleTap(i) {
+    if (mode !== 'input') return;
+    ensureAudio();
+    const t = tiles[i];
+    t.classList.add('lit');
+    beep(i, 0.22);
+    buzz(20);
+    setTimeout(() => t.classList.remove('lit'), 200);
+
+    const expected = sequence[inputIndex];
+    if (i !== expected) {
+      gameOver(i);
+      return;
+    }
+    inputIndex++;
+    if (inputIndex >= sequence.length) {
+      mode = 'showing';
+      setStatus('Clear!', 'active');
+      buzz(40);
+      await wait(550);
+      level++;
+      nextLevel();
+    }
+  }
+
+  tiles.forEach(t => {
+    const i = parseInt(t.dataset.i, 10);
+    const onPress = (e) => {
+      e.preventDefault();
+      handleTap(i);
+    };
+    t.addEventListener('touchstart', onPress, { passive: false });
+    t.addEventListener('mousedown', onPress);
+  });
+
+  startBtn.addEventListener('click', startGame, { once: true });
+})();
+</script>
+</body>
+</html>
