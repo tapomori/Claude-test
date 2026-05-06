@@ -3,7 +3,8 @@
 ## リポジトリの概要
 - `tapomori/Claude-test` は、GitHub上のRoutineが**毎日自動でスマホ向けミニゲームを1本作る**リポジトリ。
 - Routineは作業前に必ず `feedback/notes.md` を読んで方針・好みを反映する。
-- 作業ブランチ: `claude/zealous-feynman-Elh8s`
+- Routineは**毎回新しいブランチ**(`claude/<ランダム名>`)を切ってPRを作る。理想的にはRoutine自身が `main` までMergeする運用(notes.md 末尾の「運用ルール」を参照)。
+- GitHub Pages の配信元ブランチは Settings → Pages で確認できる(将来的に `main` に統一予定)。
 
 ## ディレクトリ構成
 - `games/` … 過去に生成された日次ゲーム(`YYYY-MM-DD-スラッグ/` 形式)
