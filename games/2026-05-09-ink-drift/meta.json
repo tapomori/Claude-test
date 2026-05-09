@@ -1,0 +1,8 @@
+{
+  "title": "Ink Drift",
+  "date": "2026-05-09",
+  "description": "落ちてくる色のしずくを、画面をなぞって流れ(カレント)を作り、底のボウルに導くスワイプ物理ゲーム。色を間違えるとライフが減る、流体感覚のルーティングアクション。",
+  "tags": ["swipe", "physics", "color", "routing"],
+  "rating": null,
+  "notes": ""
+}

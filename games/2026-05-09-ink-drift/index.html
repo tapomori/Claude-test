@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#04060d">
+<title>Ink Drift</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{
+    width:100%;height:100%;
+    background:#04060d;
+    color:#e8f1ff;
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+    overflow:hidden;
+    touch-action:none;
+    -webkit-tap-highlight-color:transparent;
+    user-select:none;-webkit-user-select:none;
+  }
+  body{position:fixed;inset:0}
+  canvas{display:block;width:100%;height:100%}
+  .hud{
+    position:fixed;top:0;left:0;right:0;
+    padding:14px 18px;
+    display:flex;justify-content:space-between;align-items:center;
+    pointer-events:none;
+    font-size:13px;letter-spacing:.18em;
+    text-transform:uppercase;
+    color:#9fb4d4;
+    text-shadow:0 0 12px rgba(0,0,0,.6);
+    z-index:5;
+  }
+  .hud .score{font-size:22px;color:#fff;letter-spacing:.05em;text-transform:none;font-weight:600}
+  .hud .lives{display:flex;gap:6px}
+  .heart{width:11px;height:11px;border-radius:50%;background:#ff5276;box-shadow:0 0 10px #ff5276,0 0 2px #fff inset;transition:.3s}
+  .heart.lost{background:#1a2030;box-shadow:none;opacity:.4}
+  .back{
+    position:fixed;top:10px;left:10px;
+    z-index:10;
+    width:38px;height:38px;
+    display:flex;align-items:center;justify-content:center;
+    border-radius:50%;
+    background:rgba(255,255,255,.05);
+    border:1px solid rgba(255,255,255,.08);
+    color:#9fb4d4;
+    font-size:18px;text-decoration:none;
+    backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+  }
+  .overlay{
+    position:fixed;inset:0;
+    display:flex;flex-direction:column;
+    justify-content:center;align-items:center;
+    text-align:center;
+    background:radial-gradient(ellipse at center,rgba(8,12,24,.86),rgba(2,4,10,.97));
+    backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+    z-index:20;
+    padding:32px;
+    transition:opacity .35s;
+  }
+  .overlay.hidden{opacity:0;pointer-events:none}
+  .overlay h1{
+    font-size:42px;
+    font-weight:700;
+    letter-spacing:.04em;
+    background:linear-gradient(180deg,#fff,#7fa8ff 80%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    margin-bottom:14px;
+  }
+  .overlay p{font-size:14px;line-height:1.7;color:#a8b8d4;max-width:300px;margin-bottom:22px}
+  .overlay .gesture{
+    font-size:12px;color:#6e7d99;letter-spacing:.18em;text-transform:uppercase;margin-bottom:28px;
+  }
+  .btn{
+    padding:15px 38px;
+    border-radius:999px;
+    background:linear-gradient(135deg,#5b8cff,#9e6cff);
+    color:#fff;font-size:15px;font-weight:600;letter-spacing:.1em;
+    border:none;cursor:pointer;
+    box-shadow:0 8px 30px rgba(91,140,255,.45);
+    text-transform:uppercase;
+  }
+  .btn:active{transform:translateY(1px)}
+  .final{font-size:14px;color:#9fb4d4;margin:8px 0 26px}
+  .final b{color:#fff;font-size:30px;display:block;margin-top:6px;letter-spacing:.04em}
+  .palette{display:flex;gap:10px;margin-bottom:24px}
+  .palette span{
+    width:18px;height:18px;border-radius:50%;
+    box-shadow:0 0 12px currentColor;
+  }
+</style>
+</head>
+<body>
+<a class="back" href="../../index.html" aria-label="ギャラリーへ">←</a>
+
+<canvas id="c"></canvas>
+
+<div class="hud">
+  <div class="score" id="score">0</div>
+  <div class="lives" id="lives"></div>
+</div>
+
+<div class="overlay" id="start">
+  <h1>Ink Drift</h1>
+  <div class="palette">
+    <span style="background:#ff5b8a;color:#ff5b8a"></span>
+    <span style="background:#5bd0ff;color:#5bd0ff"></span>
+    <span style="background:#ffd25b;color:#ffd25b"></span>
+    <span style="background:#7dff9e;color:#7dff9e"></span>
+  </div>
+  <p>落ちてくる色のしずくを、画面をなぞって流れを作り、底のボウルに導こう。</p>
+  <div class="gesture">SWIPE TO PUSH ・ MATCH THE COLOR</div>
+  <button class="btn" id="startBtn">START</button>
+</div>
+
+<div class="overlay hidden" id="over">
+  <h1>Drained</h1>
+  <div class="final">SCORE<b id="finalScore">0</b></div>
+  <button class="btn" id="retryBtn">AGAIN</button>
+</div>
+
+<script>
+(() => {
+  const cv = document.getElementById('c');
+  const ctx = cv.getContext('2d');
+  let W = 0, H = 0, DPR = 1;
+
+  const COLORS = [
+    {hex:'#ff5b8a', rgb:[255,91,138]},
+    {hex:'#5bd0ff', rgb:[91,208,255]},
+    {hex:'#ffd25b', rgb:[255,210,91]},
+    {hex:'#7dff9e', rgb:[125,255,158]},
+  ];
+
+  const state = {
+    drops:[], currents:[], particles:[], ripples:[], stars:[],
+    score:0, lives:3, t:0,
+    spawnTimer:0, spawnInterval:1.6,
+    waterY:0, basinW:0,
+    running:false, dead:false,
+    flash:0,
+  };
+
+  const scoreEl = document.getElementById('score');
+  const livesEl = document.getElementById('lives');
+  const startOverlay = document.getElementById('start');
+  const overOverlay = document.getElementById('over');
+  const finalScoreEl = document.getElementById('finalScore');
+
+  function resize(){
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    cv.width = W * DPR; cv.height = H * DPR;
+    cv.style.width = W+'px'; cv.style.height = H+'px';
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    state.waterY = H - Math.min(140, H*0.18);
+    state.basinW = W / 4;
+    if(!state.stars.length) initStars();
+  }
+  function initStars(){
+    state.stars = [];
+    const n = Math.floor(W*H/14000);
+    for(let i=0;i<n;i++){
+      state.stars.push({
+        x:Math.random()*W, y:Math.random()*state.waterY,
+        r:Math.random()*1.2+0.2,
+        a:Math.random()*0.6+0.15,
+        s:Math.random()*0.4+0.05,
+      });
+    }
+  }
+  window.addEventListener('resize', resize, {passive:true});
+  resize();
+
+  function renderLives(){
+    livesEl.innerHTML='';
+    for(let i=0;i<3;i++){
+      const d=document.createElement('div');
+      d.className='heart'+(i>=state.lives?' lost':'');
+      livesEl.appendChild(d);
+    }
+  }
+
+  function reset(){
+    state.drops.length=0; state.currents.length=0;
+    state.particles.length=0; state.ripples.length=0;
+    state.score=0; state.lives=3; state.t=0;
+    state.spawnTimer=0; state.spawnInterval=1.5;
+    state.flash=0; state.dead=false;
+    scoreEl.textContent='0';
+    renderLives();
+  }
+  function start(){
+    reset();
+    startOverlay.classList.add('hidden');
+    overOverlay.classList.add('hidden');
+    state.running=true;
+  }
+  function gameOver(){
+    state.running=false; state.dead=true;
+    finalScoreEl.textContent=state.score;
+    setTimeout(()=>overOverlay.classList.remove('hidden'),420);
+  }
+
+  document.getElementById('startBtn').addEventListener('click', start);
+  document.getElementById('retryBtn').addEventListener('click', start);
+
+  function spawnDrop(){
+    const margin = 30;
+    const x = margin + Math.random()*(W-2*margin);
+    const cIdx = Math.floor(Math.random()*4);
+    state.drops.push({
+      x, y:-30,
+      vx:0, vy: 60 + Math.random()*30,
+      r:14, color:cIdx,
+      rot:0, wobble:Math.random()*Math.PI*2,
+    });
+  }
+
+  function addCurrent(x,y,dx,dy,strength){
+    const m = Math.hypot(dx,dy);
+    if(m<0.5) return;
+    state.currents.push({
+      x,y,dx:dx/m, dy:dy/m,
+      strength: Math.min(strength, 280),
+      life:0.55, maxLife:0.55,
+      r: 70 + Math.min(strength*0.4, 40),
+    });
+  }
+
+  function addRipple(x,y,color,big){
+    state.ripples.push({
+      x,y,r:big?12:6, maxR:big?110:60, life:1,
+      color: color!=null ? COLORS[color].hex : '#ffffff',
+    });
+  }
+
+  function addParticles(x,y,colorIdx,n,kind){
+    const c = COLORS[colorIdx].rgb;
+    for(let i=0;i<n;i++){
+      const a = Math.random()*Math.PI*2;
+      const sp = (kind==='splash'?180:90) * (0.4+Math.random()*0.8);
+      state.particles.push({
+        x,y,
+        vx:Math.cos(a)*sp,
+        vy:Math.sin(a)*sp - (kind==='splash'?80:0),
+        life:1, max:0.6+Math.random()*0.4,
+        c, size:Math.random()*3+1.5,
+        g: kind==='splash'?260:0,
+      });
+    }
+  }
+
+  // --- input ---
+  const pointers = new Map();
+  let lastEmit = 0;
+
+  function getPos(e){
+    const t = e.touches?.[0] || e.changedTouches?.[0] || e;
+    return { x:t.clientX, y:t.clientY };
+  }
+  function down(e){
+    e.preventDefault();
+    const p = getPos(e);
+    pointers.set('p',{ x:p.x, y:p.y, t:performance.now() });
+  }
+  function move(e){
+    if(!pointers.has('p')) return;
+    e.preventDefault();
+    const p = getPos(e);
+    const prev = pointers.get('p');
+    const now = performance.now();
+    const dt = Math.max(now-prev.t,1);
+    const dx = p.x-prev.x, dy = p.y-prev.y;
+    const dist = Math.hypot(dx,dy);
+    if(dist>4 && now-lastEmit>30){
+      const speed = dist/dt*1000;
+      addCurrent(p.x, p.y, dx, dy, speed*0.35);
+      lastEmit = now;
+    }
+    pointers.set('p',{ x:p.x, y:p.y, t:now });
+  }
+  function up(e){
+    e.preventDefault();
+    pointers.delete('p');
+  }
+  cv.addEventListener('touchstart', down, {passive:false});
+  cv.addEventListener('touchmove', move, {passive:false});
+  cv.addEventListener('touchend', up, {passive:false});
+  cv.addEventListener('touchcancel', up, {passive:false});
+  cv.addEventListener('mousedown', down);
+  cv.addEventListener('mousemove', move);
+  cv.addEventListener('mouseup', up);
+  cv.addEventListener('mouseleave', up);
+
+  // --- update ---
+  function update(dt){
+    state.t += dt;
+    if(state.flash>0) state.flash = Math.max(0, state.flash - dt*2.6);
+
+    // difficulty scaling
+    const lvl = state.score;
+    state.spawnInterval = Math.max(0.55, 1.5 - lvl*0.025);
+    const fallBase = 60 + Math.min(lvl*1.6, 80);
+
+    // spawn
+    if(state.running){
+      state.spawnTimer += dt;
+      if(state.spawnTimer >= state.spawnInterval){
+        state.spawnTimer = 0;
+        spawnDrop();
+        if(lvl>8 && Math.random()<0.25) spawnDrop();
+      }
+    }
+
+    // currents
+    for(let i=state.currents.length-1;i>=0;i--){
+      const c = state.currents[i];
+      c.life -= dt;
+      if(c.life<=0) state.currents.splice(i,1);
+    }
+
+    // drops
+    for(let i=state.drops.length-1;i>=0;i--){
+      const d = state.drops[i];
+      d.wobble += dt*4;
+      // base gravity-ish fall
+      const targetVy = fallBase + (d.vy>fallBase? (d.vy-fallBase)*0.96 : 0);
+      d.vy += (fallBase - d.vy) * Math.min(dt*0.8,1);
+      d.vx *= Math.pow(0.86, dt*60);
+
+      // currents push
+      for(const c of state.currents){
+        const dx = d.x - c.x, dy = d.y - c.y;
+        const dist = Math.hypot(dx,dy);
+        if(dist < c.r){
+          const falloff = (1 - dist/c.r) * (c.life/c.maxLife);
+          d.vx += c.dx * c.strength * falloff * dt * 4.5;
+          d.vy += c.dy * c.strength * falloff * dt * 1.2;
+        }
+      }
+
+      d.x += d.vx*dt;
+      d.y += d.vy*dt;
+
+      // wall bounce
+      if(d.x < 16){ d.x=16; d.vx = Math.abs(d.vx)*0.5; }
+      if(d.x > W-16){ d.x=W-16; d.vx = -Math.abs(d.vx)*0.5; }
+
+      // hit water
+      if(d.y >= state.waterY - 4){
+        const basin = Math.max(0, Math.min(3, Math.floor(d.x / state.basinW)));
+        const ok = basin === d.color;
+        if(ok){
+          state.score++;
+          scoreEl.textContent = state.score;
+          addParticles(d.x, state.waterY, d.color, 22, 'splash');
+          addRipple(d.x, state.waterY, d.color, true);
+          if(navigator.vibrate) navigator.vibrate(8);
+        } else {
+          state.lives--;
+          renderLives();
+          state.flash = 1;
+          addParticles(d.x, state.waterY, d.color, 14, 'splash');
+          addRipple(d.x, state.waterY, null, true);
+          if(navigator.vibrate) navigator.vibrate([12, 40, 12]);
+          if(state.lives<=0){
+            state.drops.splice(i,1);
+            gameOver();
+            break;
+          }
+        }
+        state.drops.splice(i,1);
+        continue;
+      }
+    }
+
+    // particles
+    for(let i=state.particles.length-1;i>=0;i--){
+      const p = state.particles[i];
+      p.life -= dt/p.max;
+      if(p.life<=0){ state.particles.splice(i,1); continue; }
+      p.vy += p.g*dt;
+      p.x += p.vx*dt;
+      p.y += p.vy*dt;
+    }
+
+    // ripples
+    for(let i=state.ripples.length-1;i>=0;i--){
+      const r = state.ripples[i];
+      r.life -= dt*1.4;
+      r.r += (r.maxR - r.r)*dt*4;
+      if(r.life<=0) state.ripples.splice(i,1);
+    }
+
+    // stars
+    for(const s of state.stars){
+      s.a += Math.sin(state.t*2*s.s)*0.002;
+    }
+  }
+
+  // --- render ---
+  function draw(){
+    // background gradient (sky)
+    const g = ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#04060d');
+    g.addColorStop(0.6,'#0a1024');
+    g.addColorStop(1,'#0e1a3a');
+    ctx.fillStyle=g;
+    ctx.fillRect(0,0,W,H);
+
+    // stars
+    ctx.save();
+    for(const s of state.stars){
+      ctx.globalAlpha = s.a;
+      ctx.fillStyle = '#cfe0ff';
+      ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+
+    // currents (faint trails)
+    ctx.save();
+    for(const c of state.currents){
+      const a = (c.life/c.maxLife);
+      const grad = ctx.createRadialGradient(c.x,c.y,0,c.x,c.y,c.r);
+      grad.addColorStop(0,`rgba(180,210,255,${0.18*a})`);
+      grad.addColorStop(1,'rgba(180,210,255,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(c.x,c.y,c.r,0,Math.PI*2); ctx.fill();
+
+      // arrow
+      ctx.globalAlpha = a*0.7;
+      ctx.strokeStyle = 'rgba(220,235,255,0.8)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      const len = 22;
+      ctx.moveTo(c.x - c.dx*len*0.5, c.y - c.dy*len*0.5);
+      ctx.lineTo(c.x + c.dx*len*0.5, c.y + c.dy*len*0.5);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+
+    // water area
+    drawWater();
+
+    // drops
+    for(const d of state.drops){
+      drawDrop(d);
+    }
+
+    // particles
+    for(const p of state.particles){
+      ctx.globalAlpha = Math.max(0,p.life);
+      ctx.fillStyle = `rgb(${p.c[0]},${p.c[1]},${p.c[2]})`;
+      ctx.beginPath();
+      ctx.arc(p.x,p.y,p.size*Math.max(0.3,p.life),0,Math.PI*2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // ripples
+    for(const r of state.ripples){
+      ctx.globalAlpha = Math.max(0,r.life)*0.7;
+      ctx.strokeStyle = r.color;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(r.x,r.y,r.r,0,Math.PI*2); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // miss flash
+    if(state.flash>0){
+      ctx.fillStyle = `rgba(255,80,120,${state.flash*0.22})`;
+      ctx.fillRect(0,0,W,H);
+    }
+  }
+
+  function drawDrop(d){
+    const c = COLORS[d.color];
+    const wob = Math.sin(d.wobble)*0.15;
+    // glow
+    const gr = ctx.createRadialGradient(d.x,d.y,0,d.x,d.y,d.r*2.6);
+    gr.addColorStop(0, `rgba(${c.rgb[0]},${c.rgb[1]},${c.rgb[2]},0.55)`);
+    gr.addColorStop(1, `rgba(${c.rgb[0]},${c.rgb[1]},${c.rgb[2]},0)`);
+    ctx.fillStyle = gr;
+    ctx.beginPath(); ctx.arc(d.x,d.y,d.r*2.6,0,Math.PI*2); ctx.fill();
+
+    // teardrop body
+    ctx.save();
+    ctx.translate(d.x, d.y);
+    const speed = Math.hypot(d.vx,d.vy);
+    const dir = Math.atan2(d.vy, d.vx);
+    ctx.rotate(dir - Math.PI/2);
+    ctx.scale(1+wob*0.1, 1-wob*0.1);
+
+    ctx.fillStyle = c.hex;
+    ctx.beginPath();
+    // simple teardrop using bezier
+    ctx.moveTo(0, -d.r*1.4);
+    ctx.bezierCurveTo(d.r*1.1, -d.r*0.4,  d.r*1.0,  d.r*0.9,  0,  d.r*1.0);
+    ctx.bezierCurveTo(-d.r*1.0, d.r*0.9, -d.r*1.1, -d.r*0.4, 0, -d.r*1.4);
+    ctx.fill();
+
+    // highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.beginPath();
+    ctx.ellipse(-d.r*0.35, -d.r*0.2, d.r*0.22, d.r*0.5, 0.4, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawWater(){
+    // basins
+    for(let i=0;i<4;i++){
+      const x = i*state.basinW;
+      const c = COLORS[i];
+      // basin glow up
+      const g = ctx.createLinearGradient(0, state.waterY-30, 0, H);
+      g.addColorStop(0, `rgba(${c.rgb[0]},${c.rgb[1]},${c.rgb[2]},0)`);
+      g.addColorStop(0.4, `rgba(${c.rgb[0]},${c.rgb[1]},${c.rgb[2]},0.30)`);
+      g.addColorStop(1, `rgba(${c.rgb[0]},${c.rgb[1]},${c.rgb[2]},0.55)`);
+      ctx.fillStyle = g;
+      ctx.fillRect(x, state.waterY-30, state.basinW, H-state.waterY+30);
+
+      // separators
+      if(i>0){
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+        ctx.lineWidth=1;
+        ctx.beginPath(); ctx.moveTo(x, state.waterY-10); ctx.lineTo(x, H); ctx.stroke();
+      }
+    }
+
+    // water surface line with wave
+    ctx.save();
+    ctx.beginPath();
+    const amp = 4;
+    ctx.moveTo(0, state.waterY);
+    for(let x=0;x<=W;x+=12){
+      const y = state.waterY + Math.sin(x*0.025 + state.t*1.6) * amp + Math.sin(x*0.06 - state.t*1.1)*amp*0.4;
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
+    ctx.fillStyle = 'rgba(8,16,38,0.55)';
+    ctx.fill();
+
+    // surface stroke
+    ctx.beginPath();
+    ctx.moveTo(0, state.waterY);
+    for(let x=0;x<=W;x+=12){
+      const y = state.waterY + Math.sin(x*0.025 + state.t*1.6) * amp + Math.sin(x*0.06 - state.t*1.1)*amp*0.4;
+      ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = 'rgba(180,210,255,0.35)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // --- main loop ---
+  let last = performance.now();
+  function loop(now){
+    const dt = Math.min((now-last)/1000, 0.05);
+    last = now;
+    if(state.running) update(dt);
+    else {
+      // gentle ambient updates while paused
+      state.t += dt;
+      for(let i=state.particles.length-1;i>=0;i--){
+        const p = state.particles[i];
+        p.life -= dt/p.max;
+        if(p.life<=0){ state.particles.splice(i,1); continue; }
+        p.vy += p.g*dt; p.x += p.vx*dt; p.y += p.vy*dt;
+      }
+      for(let i=state.ripples.length-1;i>=0;i--){
+        const r = state.ripples[i];
+        r.life -= dt*1.4; r.r += (r.maxR - r.r)*dt*4;
+        if(r.life<=0) state.ripples.splice(i,1);
+      }
+      for(let i=state.currents.length-1;i>=0;i--){
+        const c = state.currents[i];
+        c.life -= dt;
+        if(c.life<=0) state.currents.splice(i,1);
+      }
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+  renderLives();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
