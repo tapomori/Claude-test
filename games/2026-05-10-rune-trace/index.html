@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0a0420">
+<title>Rune Trace</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    touch-action: manipulation; user-select: none; -webkit-user-select: none;
+    overscroll-behavior: none;
+  }
+  body {
+    background: radial-gradient(ellipse at 50% 0%, #1a0a3a 0%, #0a0420 55%, #000 100%);
+    color: #e8e8ff;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Helvetica Neue", sans-serif;
+    display: flex; flex-direction: column; height: 100vh;
+  }
+  #stage { position: relative; flex: 1; overflow: hidden; }
+  canvas#fx { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #back {
+    position: absolute; top: 12px; right: 16px; color: #66f4ff; opacity: 0.55;
+    font-size: 11px; text-decoration: none; z-index: 30; letter-spacing: 0.2em;
+    padding: 6px 10px;
+  }
+  #hud {
+    position: absolute; top: 12px; left: 16px; right: 80px;
+    display: flex; justify-content: space-between; gap: 12px;
+    font-size: 12px; letter-spacing: 0.2em; z-index: 20; pointer-events: none;
+    text-shadow: 0 0 6px rgba(102,244,255,0.4);
+  }
+  #score { color: #e8e8ff; }
+  #streak { color: #ff66e0; opacity: 0.85; }
+  #timebar {
+    position: absolute; top: 38px; left: 16px; right: 16px; height: 3px;
+    background: rgba(255,255,255,0.08); border-radius: 2px; overflow: hidden;
+    z-index: 20;
+  }
+  #timefill {
+    height: 100%; width: 100%;
+    background: linear-gradient(90deg, #66f4ff, #a466ff, #ff66e0);
+    box-shadow: 0 0 8px rgba(102,244,255,0.6);
+    transition: width 0.08s linear;
+  }
+  #glyphwrap {
+    position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
+    width: 140px; height: 140px; z-index: 5;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #glyph { width: 100%; height: 100%; }
+  #prompt {
+    position: absolute; top: 210px; left: 0; right: 0; text-align: center;
+    font-size: 11px; opacity: 0.45; letter-spacing: 0.3em; z-index: 5;
+  }
+  #message {
+    position: absolute; top: 50%; left: 0; right: 0; text-align: center;
+    transform: translate(0, -50%); font-size: 28px; font-weight: 200; letter-spacing: 0.3em;
+    z-index: 25; pointer-events: none; opacity: 0;
+    transition: opacity 0.2s, transform 0.3s;
+  }
+  #message.show { opacity: 1; }
+  #overlay {
+    position: absolute; inset: 0;
+    background: rgba(5, 2, 20, 0.85);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 18px; z-index: 40;
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  }
+  #overlay h1 {
+    font-size: 26px; font-weight: 200; letter-spacing: 0.5em;
+    background: linear-gradient(90deg, #66f4ff, #ff66e0);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    padding-left: 0.5em;
+  }
+  #overlay .sub {
+    font-size: 11px; opacity: 0.55; letter-spacing: 0.3em; max-width: 80%;
+    text-align: center; line-height: 1.8;
+  }
+  #overlay .score-display {
+    font-size: 14px; opacity: 0.5; letter-spacing: 0.25em; margin-top: 6px;
+  }
+  #overlay .score-big {
+    font-size: 56px; font-weight: 200; color: #ff66e0;
+    text-shadow: 0 0 20px rgba(255,102,224,0.45);
+    margin: -6px 0;
+  }
+  .btn {
+    display: inline-block; padding: 14px 44px;
+    border: 1px solid #66f4ff; border-radius: 30px;
+    color: #66f4ff; background: rgba(102, 244, 255, 0.05);
+    letter-spacing: 0.3em; font-size: 13px; cursor: pointer;
+    box-shadow: 0 0 20px rgba(102,244,255,0.15) inset;
+    margin-top: 8px;
+  }
+  .btn:active { transform: scale(0.97); background: rgba(102,244,255,0.12); }
+  .hidden { display: none !important; }
+  .flash-correct { animation: flashc 0.4s ease-out; }
+  .flash-wrong { animation: flashw 0.4s ease-out; }
+  @keyframes flashc {
+    0% { box-shadow: inset 0 0 0 0 rgba(102,244,255,0); }
+    30% { box-shadow: inset 0 0 80px 0 rgba(102,244,255,0.35); }
+    100% { box-shadow: inset 0 0 0 0 rgba(102,244,255,0); }
+  }
+  @keyframes flashw {
+    0% { box-shadow: inset 0 0 0 0 rgba(255,80,120,0); transform: translateX(0); }
+    20% { box-shadow: inset 0 0 80px 0 rgba(255,80,120,0.4); transform: translateX(-6px); }
+    40% { transform: translateX(6px); }
+    60% { transform: translateX(-3px); }
+    80% { transform: translateX(3px); }
+    100% { box-shadow: inset 0 0 0 0 rgba(255,80,120,0); transform: translateX(0); }
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <a id="back" href="../../index.html">← gallery</a>
+  <div id="hud"><span id="score">SCORE 0</span><span id="streak">×1</span></div>
+  <div id="timebar"><div id="timefill"></div></div>
+  <div id="glyphwrap"><svg id="glyph" viewBox="0 0 100 100"></svg></div>
+  <div id="prompt">trace the rune</div>
+  <canvas id="fx"></canvas>
+  <div id="message"></div>
+  <div id="overlay">
+    <h1>RUNE TRACE</h1>
+    <p class="sub">表示されたルーンを指でなぞる<br>速く正確に、連鎖を切らすな</p>
+    <div class="btn" id="startbtn">START</div>
+  </div>
+</div>
+<script>
+(() => {
+  const stage = document.getElementById('stage');
+  const canvas = document.getElementById('fx');
+  const ctx = canvas.getContext('2d');
+  const glyphEl = document.getElementById('glyph');
+  const scoreEl = document.getElementById('score');
+  const streakEl = document.getElementById('streak');
+  const timefill = document.getElementById('timefill');
+  const message = document.getElementById('message');
+  const overlay = document.getElementById('overlay');
+  const startBtn = document.getElementById('startbtn');
+
+  let W = 0, H = 0, dpr = 1;
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = stage.clientWidth; H = stage.clientHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // 8 octant directions: 0=E 1=SE 2=S 3=SW 4=W 5=NW 6=N 7=NE
+  const DIRS = [
+    [1, 0], [1, 1], [0, 1], [-1, 1],
+    [-1, 0], [-1, -1], [0, -1], [1, -1],
+  ].map(([x, y]) => { const m = Math.hypot(x, y); return [x/m, y/m]; });
+
+  const RUNES = [
+    { name: 'lambda',    seq: [1, 7] },
+    { name: 'vee',       seq: [7, 1] },
+    { name: 'L',         seq: [2, 0] },
+    { name: 'gamma',     seq: [0, 2] },
+    { name: 'cap',       seq: [6, 0, 2] },
+    { name: 'cup',       seq: [2, 0, 6] },
+    { name: 'zigzag',    seq: [0, 3, 0] },
+    { name: 'enn',       seq: [6, 1, 6] },
+    { name: 'ess',       seq: [4, 2, 0] },
+    { name: 'lightning', seq: [1, 3, 1] },
+    { name: 'square',    seq: [0, 2, 4, 6] },
+    { name: 'spiral',    seq: [0, 2, 4, 6, 0] },
+  ];
+
+  // ---- State ----
+  let state = 'idle';   // idle | playing | over
+  let pts = [];
+  let drawing = false;
+  let timeLeft = 8, timeMax = 10;
+  let score = 0, streak = 0, best = 0;
+  let currentSeq = [];
+  let particles = [];
+  let trailFade = 1;
+  let lastT = performance.now();
+  let lastFrameTrail = [];
+
+  // ---- Rune rendering ----
+  function buildPath(seq, scale = 22) {
+    let x = 0, y = 0;
+    const pts = [{ x, y }];
+    for (const d of seq) {
+      const [dx, dy] = DIRS[d];
+      x += dx * scale; y += dy * scale;
+      pts.push({ x, y });
+    }
+    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    return pts.map(p => ({ x: p.x - cx + 50, y: p.y - cy + 50 }));
+  }
+  function renderRune(seq) {
+    const p = buildPath(seq);
+    const dStr = p.map((pt, i) => (i ? 'L' : 'M') + pt.x.toFixed(2) + ' ' + pt.y.toFixed(2)).join(' ');
+    glyphEl.innerHTML = `
+      <defs>
+        <filter id="g" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="2.5" result="b"/>
+          <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+      <path d="${dStr}" fill="none" stroke="#66f4ff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" opacity="0.35" filter="url(#g)"/>
+      <path d="${dStr}" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="${p[0].x.toFixed(2)}" cy="${p[0].y.toFixed(2)}" r="3.5" fill="#ff66e0"/>
+      <circle cx="${p[p.length-1].x.toFixed(2)}" cy="${p[p.length-1].y.toFixed(2)}" r="2.5" fill="#66f4ff" opacity="0.7"/>
+    `;
+  }
+
+  function pickRune() {
+    let pool;
+    if (score < 3) pool = RUNES.filter(r => r.seq.length <= 2);
+    else if (score < 8) pool = RUNES.filter(r => r.seq.length <= 3);
+    else pool = RUNES;
+    const r = pool[Math.floor(Math.random() * pool.length)];
+    currentSeq = r.seq.slice();
+    renderRune(currentSeq);
+  }
+
+  // ---- Path analysis ----
+  function analyzePath(rawPts) {
+    if (rawPts.length < 4) return [];
+    const step = 14;
+    const rs = [rawPts[0]];
+    for (let i = 1; i < rawPts.length; i++) {
+      let prev = rs[rs.length - 1];
+      let dx = rawPts[i].x - prev.x, dy = rawPts[i].y - prev.y;
+      let d = Math.hypot(dx, dy);
+      while (d >= step) {
+        const t = step / d;
+        rs.push({ x: prev.x + dx * t, y: prev.y + dy * t });
+        prev = rs[rs.length - 1];
+        dx = rawPts[i].x - prev.x; dy = rawPts[i].y - prev.y;
+        d = Math.hypot(dx, dy);
+      }
+    }
+    if (rs.length < 3) return [];
+    const dirs = [];
+    for (let i = 1; i < rs.length; i++) {
+      const dx = rs[i].x - rs[i-1].x;
+      const dy = rs[i].y - rs[i-1].y;
+      const ang = Math.atan2(dy, dx);
+      const oct = ((Math.round(ang / (Math.PI / 4)) % 8) + 8) % 8;
+      dirs.push(oct);
+    }
+    // Run-length encode and filter short runs
+    const rle = [];
+    for (const d of dirs) {
+      if (rle.length && rle[rle.length-1].d === d) rle[rle.length-1].n++;
+      else rle.push({ d, n: 1 });
+    }
+    const filt = rle.filter(r => r.n >= 2);
+    const seq = [];
+    for (const r of filt) {
+      if (seq.length === 0 || seq[seq.length-1] !== r.d) seq.push(r.d);
+    }
+    return seq;
+  }
+
+  function matches(target, seq) {
+    if (seq.length !== target.length) return false;
+    for (let i = 0; i < target.length; i++) {
+      const diff = ((seq[i] - target[i]) % 8 + 8) % 8;
+      if (diff !== 0 && diff !== 1 && diff !== 7) return false;
+    }
+    return true;
+  }
+
+  // ---- Particles ----
+  function burst(x, y, color, n = 26, power = 1) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = (Math.random() * 2 + 1) * power;
+      particles.push({
+        x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+        life: 1, decay: 0.018 + Math.random() * 0.02,
+        size: Math.random() * 2.5 + 1, color,
+      });
+    }
+  }
+
+  // ---- Touch ----
+  function getXY(ev) {
+    const t = ev.touches ? ev.touches[0] : ev;
+    const r = stage.getBoundingClientRect();
+    return { x: t.clientX - r.left, y: t.clientY - r.top };
+  }
+  function onStart(ev) {
+    if (state !== 'playing') return;
+    ev.preventDefault();
+    drawing = true;
+    pts = [getXY(ev)];
+  }
+  function onMove(ev) {
+    if (!drawing || state !== 'playing') return;
+    ev.preventDefault();
+    const p = getXY(ev);
+    const last = pts[pts.length - 1];
+    if (Math.hypot(p.x - last.x, p.y - last.y) > 2) pts.push(p);
+    // sparkles along trail
+    if (Math.random() < 0.4) {
+      particles.push({
+        x: p.x, y: p.y,
+        vx: (Math.random() - 0.5) * 0.6, vy: (Math.random() - 0.5) * 0.6,
+        life: 0.7, decay: 0.05, size: Math.random() * 1.5 + 0.6,
+        color: '#a8e8ff',
+      });
+    }
+  }
+  function onEnd(ev) {
+    if (!drawing) return;
+    drawing = false;
+    if (state !== 'playing') return;
+    const seq = analyzePath(pts);
+    evaluate(seq);
+    pts = [];
+  }
+
+  stage.addEventListener('touchstart', onStart, { passive: false });
+  stage.addEventListener('touchmove', onMove, { passive: false });
+  stage.addEventListener('touchend', onEnd, { passive: false });
+  stage.addEventListener('touchcancel', onEnd, { passive: false });
+  // Mouse fallback
+  stage.addEventListener('mousedown', e => { onStart(e); });
+  stage.addEventListener('mousemove', e => { if (drawing) onMove(e); });
+  stage.addEventListener('mouseup', onEnd);
+  stage.addEventListener('mouseleave', onEnd);
+
+  // ---- Evaluation ----
+  function flashMessage(txt, color) {
+    message.textContent = txt;
+    message.style.color = color;
+    message.classList.add('show');
+    clearTimeout(flashMessage._t);
+    flashMessage._t = setTimeout(() => message.classList.remove('show'), 500);
+  }
+  function vibe(p) {
+    if (navigator.vibrate) { try { navigator.vibrate(p); } catch (e) {} }
+  }
+  function evaluate(seq) {
+    const ok = matches(currentSeq, seq);
+    const cx = stage.clientWidth / 2;
+    const cy = 56 + 70;
+    if (ok) {
+      score++;
+      streak++;
+      const bonus = Math.min(2.2, 1.4 + streak * 0.05);
+      timeLeft = Math.min(timeMax, timeLeft + bonus);
+      scoreEl.textContent = 'SCORE ' + score;
+      streakEl.textContent = '×' + (1 + Math.floor(streak / 3));
+      flashMessage('CAST', '#66f4ff');
+      burst(cx, cy, '#66f4ff', 30, 1.4);
+      burst(cx, cy, '#ff66e0', 18, 1.0);
+      stage.classList.remove('flash-correct'); void stage.offsetWidth;
+      stage.classList.add('flash-correct');
+      vibe(20);
+      pickRune();
+    } else {
+      streak = 0;
+      timeLeft = Math.max(0, timeLeft - 1.5);
+      streakEl.textContent = '×1';
+      flashMessage('MISS', '#ff5078');
+      burst(cx, cy, '#ff5078', 22, 1.0);
+      stage.classList.remove('flash-wrong'); void stage.offsetWidth;
+      stage.classList.add('flash-wrong');
+      vibe([15, 30, 15]);
+    }
+  }
+
+  // ---- Render loop ----
+  function tick(t) {
+    const dt = Math.min(0.05, (t - lastT) / 1000);
+    lastT = t;
+
+    // Time
+    if (state === 'playing') {
+      timeLeft -= dt;
+      if (timeLeft <= 0) {
+        timeLeft = 0;
+        gameOver();
+      }
+      timefill.style.width = (timeLeft / timeMax * 100).toFixed(1) + '%';
+    }
+
+    // Clear with slight alpha for trail fade
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'lighter';
+
+    // Player trail
+    if (pts.length > 1) {
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.strokeStyle = 'rgba(102, 244, 255, 0.35)';
+      ctx.lineWidth = 14;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+    }
+
+    // Particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx; p.y += p.vy;
+      p.vx *= 0.96; p.vy *= 0.96;
+      p.life -= p.decay;
+      if (p.life <= 0) { particles.splice(i, 1); continue; }
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+
+  // ---- Game flow ----
+  function startGame() {
+    state = 'playing';
+    score = 0; streak = 0;
+    timeLeft = 8; timeMax = 10;
+    scoreEl.textContent = 'SCORE 0';
+    streakEl.textContent = '×1';
+    overlay.classList.add('hidden');
+    pickRune();
+    lastT = performance.now();
+  }
+  function gameOver() {
+    state = 'over';
+    if (score > best) best = score;
+    overlay.classList.remove('hidden');
+    overlay.innerHTML = `
+      <p class="score-display">SCORE</p>
+      <div class="score-big">${score}</div>
+      <p class="sub">BEST ${best}　・　ルーン ${score} 個発動</p>
+      <div class="btn" id="restartbtn">RETRY</div>
+      <a href="../../index.html" style="color:#66f4ff;opacity:0.55;font-size:11px;letter-spacing:0.25em;text-decoration:none;margin-top:8px;">← BACK TO GALLERY</a>
+    `;
+    document.getElementById('restartbtn').addEventListener('click', startGame);
+    document.getElementById('restartbtn').addEventListener('touchend', e => { e.preventDefault(); startGame(); });
+  }
+
+  startBtn.addEventListener('click', startGame);
+  startBtn.addEventListener('touchend', e => { e.preventDefault(); startGame(); });
+
+  // Prevent gestures on stage
+  document.addEventListener('gesturestart', e => e.preventDefault());
+  document.addEventListener('contextmenu', e => e.preventDefault());
+})();
+</script>
+</body>
+</html>
