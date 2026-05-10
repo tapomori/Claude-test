@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Orbit Pin</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: #07071a;
+    color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", system-ui, sans-serif;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    overscroll-behavior: none;
+  }
+  body { display: block; }
+  canvas { display: block; position: fixed; inset: 0; touch-action: manipulation; }
+  #back {
+    position: fixed; top: 12px; left: 12px;
+    padding: 8px 12px;
+    background: rgba(20, 20, 40, 0.6);
+    color: #9af;
+    text-decoration: none;
+    font-size: 13px;
+    border-radius: 10px;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 10;
+    border: 1px solid rgba(150, 170, 255, 0.2);
+  }
+  #hud {
+    position: fixed; top: 12px; right: 12px;
+    padding: 8px 12px;
+    background: rgba(20, 20, 40, 0.6);
+    color: #fff;
+    font-size: 13px;
+    line-height: 1.4;
+    border-radius: 10px;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 10;
+    text-align: right;
+    border: 1px solid rgba(150, 170, 255, 0.2);
+    font-variant-numeric: tabular-nums;
+  }
+  #hud .lvl { color: #ffb3e1; font-weight: 600; }
+  #overlay {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: radial-gradient(circle at center, rgba(40, 20, 90, 0.85), rgba(7, 7, 26, 0.96));
+    z-index: 20;
+    transition: opacity 0.3s ease;
+    padding: 24px;
+    text-align: center;
+  }
+  #overlay.hidden { opacity: 0; pointer-events: none; }
+  #overlay h1 {
+    font-size: 40px;
+    margin-bottom: 14px;
+    letter-spacing: 4px;
+    background: linear-gradient(90deg, #ff5ec4, #5ec1ff);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+  #overlay p {
+    font-size: 15px;
+    margin-bottom: 28px;
+    opacity: 0.85;
+    line-height: 1.6;
+  }
+  #startBtn {
+    padding: 14px 40px;
+    font-size: 18px;
+    background: linear-gradient(135deg, #ff5ec4, #5ec1ff);
+    border: none;
+    color: #fff;
+    border-radius: 40px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    cursor: pointer;
+    box-shadow: 0 8px 32px rgba(255, 94, 196, 0.4);
+    transition: transform 0.08s ease;
+    font-family: inherit;
+  }
+  #startBtn:active { transform: scale(0.96); }
+  #subtle {
+    font-size: 12px;
+    margin-top: 18px;
+    opacity: 0.5;
+    letter-spacing: 1px;
+  }
+</style>
+</head>
+<body>
+<a id="back" href="../../index.html">‹ ギャラリー</a>
+<div id="hud">
+  <div id="scoreEl">SCORE 0</div>
+  <div><span class="lvl" id="levelEl">LV 1</span> · <span id="remainEl">残 7</span></div>
+</div>
+<canvas id="game"></canvas>
+<div id="overlay">
+  <h1 id="titleEl">ORBIT PIN</h1>
+  <p id="msgEl">画面のどこでもタップでピンを発射<br>回る惑星に刺せ、ただし<br>既に刺さったピンに当てたら破滅</p>
+  <button id="startBtn">START</button>
+  <div id="subtle"><span id="finalLine">リンゴはボーナス</span></div>
+</div>
+<script>
+(() => {
+  const cv = document.getElementById('game');
+  const ctx = cv.getContext('2d');
+  const overlay = document.getElementById('overlay');
+  const titleEl = document.getElementById('titleEl');
+  const msgEl = document.getElementById('msgEl');
+  const startBtn = document.getElementById('startBtn');
+  const finalLine = document.getElementById('finalLine');
+  const scoreEl = document.getElementById('scoreEl');
+  const levelEl = document.getElementById('levelEl');
+  const remainEl = document.getElementById('remainEl');
+
+  let W = 0, H = 0, DPR = 1;
+  let starCanvas = null;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    cv.width = Math.round(W * DPR);
+    cv.height = Math.round(H * DPR);
+    cv.style.width = W + 'px';
+    cv.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    starCanvas = null;
+    if (orb) {
+      orb.x = W / 2;
+      orb.y = H * 0.42;
+      orb.r = Math.min(W, H) * 0.18;
+    }
+  }
+  window.addEventListener('resize', resize);
+
+  let state = 'menu';
+  let score = 0;
+  let level = 1;
+  let pinsRemaining = 0;
+  let orb = null;
+  let pins = [];
+  let flying = null;
+  let particles = [];
+  let shake = 0;
+  let levelMsgFrames = 0;
+  let lastTime = 0;
+
+  resize();
+
+  function startGame() {
+    score = 0;
+    level = 1;
+    state = 'play';
+    overlay.classList.add('hidden');
+    initLevel();
+  }
+
+  function initLevel() {
+    orb = {
+      x: W / 2,
+      y: H * 0.42,
+      r: Math.min(W, H) * 0.18,
+      angle: Math.random() * Math.PI * 2,
+      speed: 0.55 + level * 0.13,
+      direction: Math.random() < 0.5 ? 1 : -1,
+      hue: (level * 53 + 200) % 360,
+      flips: level >= 3 && Math.random() < 0.55,
+      nextFlip: 2.5 + Math.random() * 2.5
+    };
+    pins = [];
+    // Pre-place bonus apples (these can be hit safely for bonus points)
+    const apples = Math.min(2 + Math.floor(level / 2), 6);
+    for (let i = 0; i < apples; i++) {
+      pins.push({
+        angle: (i / apples) * Math.PI * 2 + Math.random() * 0.2,
+        kind: 'apple',
+        scale: 0
+      });
+    }
+    pinsRemaining = 5 + Math.min(level, 6) * 2;
+    flying = null;
+    particles = [];
+    shake = 0;
+    updateHud();
+  }
+
+  function updateHud() {
+    scoreEl.textContent = 'SCORE ' + score;
+    levelEl.textContent = 'LV ' + level;
+    remainEl.textContent = '残 ' + pinsRemaining;
+  }
+
+  function shootPin() {
+    if (state !== 'play' || flying) return;
+    flying = {
+      x: W / 2,
+      y: H * 0.88,
+      vy: -Math.max(W, H) * 1.7,
+      trail: []
+    };
+    if (navigator.vibrate) navigator.vibrate(6);
+  }
+
+  function burst(x, y, hue, count, speed) {
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = speed * (0.35 + Math.random() * 0.9);
+      particles.push({
+        x, y,
+        vx: Math.cos(a) * s,
+        vy: Math.sin(a) * s,
+        life: 1,
+        decay: 0.012 + Math.random() * 0.025,
+        hue: hue + (Math.random() - 0.5) * 50,
+        size: 2 + Math.random() * 3.2
+      });
+    }
+  }
+
+  function angleDiff(a, b) {
+    let d = (a - b) % (Math.PI * 2);
+    if (d > Math.PI) d -= Math.PI * 2;
+    if (d < -Math.PI) d += Math.PI * 2;
+    return d;
+  }
+
+  function attachPin() {
+    const dx = flying.x - orb.x;
+    const dy = flying.y - orb.y;
+    const worldAngle = Math.atan2(dy, dx);
+    const localAngle = worldAngle - orb.angle;
+    // Collision threshold in arc length: 16px
+    const threshold = 16;
+    for (const p of pins) {
+      const d = Math.abs(angleDiff(localAngle, p.angle));
+      const arcDist = d * orb.r;
+      if (arcDist < threshold) {
+        if (p.kind === 'apple') {
+          // Convert apple to pin, bonus points
+          p.kind = 'pin';
+          p.angle = localAngle;
+          p.scale = 1;
+          score += 50;
+          burst(flying.x, flying.y, 50, 28, 320);
+          if (navigator.vibrate) navigator.vibrate([8, 20, 12]);
+          flying = null;
+          pinsRemaining--;
+          shake = 9;
+          updateHud();
+          if (pinsRemaining <= 0) levelComplete();
+          return;
+        } else {
+          // Hit existing pin: game over
+          burst(flying.x, flying.y, 0, 70, 420);
+          if (navigator.vibrate) navigator.vibrate([60, 50, 120]);
+          shake = 22;
+          flying = null;
+          state = 'gameOverWait';
+          setTimeout(showGameOver, 850);
+          return;
+        }
+      }
+    }
+    pins.push({ angle: localAngle, kind: 'pin', scale: 0 });
+    score += 10;
+    pinsRemaining--;
+    burst(flying.x, flying.y, (orb.hue + 180) % 360, 18, 200);
+    if (navigator.vibrate) navigator.vibrate(12);
+    flying = null;
+    shake = 6;
+    updateHud();
+    if (pinsRemaining <= 0) levelComplete();
+  }
+
+  function levelComplete() {
+    state = 'levelComplete';
+    score += 100 * level;
+    burst(orb.x, orb.y, orb.hue, 60, 380);
+    if (navigator.vibrate) navigator.vibrate([20, 40, 20, 40, 20]);
+    levelMsgFrames = 80;
+    setTimeout(() => {
+      level++;
+      state = 'play';
+      initLevel();
+    }, 1300);
+  }
+
+  function showGameOver() {
+    overlay.classList.remove('hidden');
+    titleEl.textContent = 'GAME OVER';
+    msgEl.innerHTML = 'レベル ' + level + ' で衝突<br>もう一度挑もう';
+    startBtn.textContent = 'RETRY';
+    finalLine.textContent = 'SCORE  ' + score;
+    state = 'menu';
+  }
+
+  startBtn.addEventListener('click', startGame);
+
+  function handleTap(e) {
+    if (e.cancelable) e.preventDefault();
+    if (state === 'play') shootPin();
+  }
+  cv.addEventListener('touchstart', handleTap, { passive: false });
+  cv.addEventListener('mousedown', handleTap);
+
+  function frame(now) {
+    if (!lastTime) lastTime = now;
+    const dt = Math.min(0.05, (now - lastTime) / 1000);
+    lastTime = now;
+
+    if (orb && state !== 'menu') {
+      orb.angle += orb.speed * orb.direction * dt;
+      if (orb.flips && state === 'play') {
+        orb.nextFlip -= dt;
+        if (orb.nextFlip <= 0) {
+          orb.direction *= -1;
+          orb.nextFlip = 2 + Math.random() * 3;
+        }
+      }
+    }
+    for (const p of pins) {
+      if (p.scale < 1) p.scale = Math.min(1, p.scale + dt * 6);
+    }
+    if (flying) {
+      flying.trail.push({ x: flying.x, y: flying.y, life: 1 });
+      if (flying.trail.length > 12) flying.trail.shift();
+      flying.y += flying.vy * dt;
+      const dx = flying.x - orb.x;
+      const dy = flying.y - orb.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist <= orb.r + 4) {
+        const ang = Math.atan2(dy, dx);
+        flying.x = orb.x + Math.cos(ang) * orb.r;
+        flying.y = orb.y + Math.sin(ang) * orb.r;
+        attachPin();
+      } else if (flying.y < -200) {
+        flying = null;
+      }
+    }
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= 0.94;
+      p.vy *= 0.94;
+      p.life -= p.decay;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+    if (shake > 0) shake = Math.max(0, shake - 60 * dt);
+    if (levelMsgFrames > 0) levelMsgFrames--;
+
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  function drawStars() {
+    if (!starCanvas) {
+      starCanvas = document.createElement('canvas');
+      starCanvas.width = Math.round(W * DPR);
+      starCanvas.height = Math.round(H * DPR);
+      const sctx = starCanvas.getContext('2d');
+      sctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      for (let i = 0; i < 100; i++) {
+        const x = Math.random() * W;
+        const y = Math.random() * H;
+        const r = Math.random() * 1.4 + 0.2;
+        const a = 0.15 + Math.random() * 0.55;
+        sctx.fillStyle = `rgba(255,255,255,${a})`;
+        sctx.beginPath();
+        sctx.arc(x, y, r, 0, Math.PI * 2);
+        sctx.fill();
+      }
+      // Distant nebula tint
+      const grad = sctx.createRadialGradient(W / 2, H * 0.42, 0, W / 2, H * 0.42, Math.max(W, H) * 0.6);
+      grad.addColorStop(0, 'rgba(120, 60, 200, 0.18)');
+      grad.addColorStop(0.5, 'rgba(60, 30, 120, 0.08)');
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      sctx.fillStyle = grad;
+      sctx.fillRect(0, 0, W, H);
+    }
+    ctx.drawImage(starCanvas, 0, 0, W, H);
+  }
+
+  function draw() {
+    ctx.fillStyle = '#07071a';
+    ctx.fillRect(0, 0, W, H);
+    drawStars();
+
+    ctx.save();
+    if (shake > 0) {
+      const s = shake / 2;
+      ctx.translate((Math.random() - 0.5) * s, (Math.random() - 0.5) * s);
+    }
+
+    if (orb) {
+      // Outer glow
+      const glow = ctx.createRadialGradient(orb.x, orb.y, orb.r, orb.x, orb.y, orb.r * 1.8);
+      glow.addColorStop(0, `hsla(${orb.hue}, 90%, 60%, 0.35)`);
+      glow.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(orb.x, orb.y, orb.r * 1.8, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Planet body
+      const body = ctx.createRadialGradient(
+        orb.x - orb.r * 0.35, orb.y - orb.r * 0.35, orb.r * 0.1,
+        orb.x, orb.y, orb.r
+      );
+      body.addColorStop(0, `hsl(${orb.hue}, 85%, 78%)`);
+      body.addColorStop(0.55, `hsl(${(orb.hue + 25) % 360}, 75%, 50%)`);
+      body.addColorStop(1, `hsl(${(orb.hue + 60) % 360}, 80%, 18%)`);
+      ctx.fillStyle = body;
+      ctx.beginPath();
+      ctx.arc(orb.x, orb.y, orb.r, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Direction tick on rim (subtle)
+      ctx.strokeStyle = `hsla(${orb.hue}, 100%, 92%, 0.55)`;
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      const ta0 = orb.angle - 0.08;
+      const ta1 = orb.angle + 0.08 * orb.direction;
+      ctx.beginPath();
+      ctx.arc(orb.x, orb.y, orb.r * 0.78, ta0, ta1, orb.direction < 0);
+      ctx.stroke();
+
+      // Pins & apples
+      for (const p of pins) {
+        const worldAng = p.angle + orb.angle;
+        if (p.kind === 'apple') {
+          const ax = orb.x + Math.cos(worldAng) * (orb.r + 14);
+          const ay = orb.y + Math.sin(worldAng) * (orb.r + 14);
+          const r = 10 * (p.scale || 1);
+          // glow
+          ctx.fillStyle = 'rgba(255, 80, 110, 0.3)';
+          ctx.beginPath();
+          ctx.arc(ax, ay, r + 5, 0, Math.PI * 2);
+          ctx.fill();
+          // body
+          const ag = ctx.createRadialGradient(ax - 3, ay - 3, 1, ax, ay, r);
+          ag.addColorStop(0, '#ff9bb2');
+          ag.addColorStop(1, '#c81d3a');
+          ctx.fillStyle = ag;
+          ctx.beginPath();
+          ctx.arc(ax, ay, r, 0, Math.PI * 2);
+          ctx.fill();
+          // leaf
+          ctx.fillStyle = '#7fb84a';
+          ctx.beginPath();
+          ctx.ellipse(ax + 3, ay - r - 1, 4, 2.5, -0.6, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          const sc = p.scale || 1;
+          const x0 = orb.x + Math.cos(worldAng) * orb.r;
+          const y0 = orb.y + Math.sin(worldAng) * orb.r;
+          const len = 30 * sc;
+          const x1 = orb.x + Math.cos(worldAng) * (orb.r + len);
+          const y1 = orb.y + Math.sin(worldAng) * (orb.r + len);
+          // shaft
+          ctx.strokeStyle = '#e8eaff';
+          ctx.lineWidth = 3;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(x0, y0);
+          ctx.lineTo(x1, y1);
+          ctx.stroke();
+          // head glow
+          ctx.fillStyle = `hsla(${(orb.hue + 180) % 360}, 90%, 80%, 0.5)`;
+          ctx.beginPath();
+          ctx.arc(x1, y1, 9 * sc, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = `hsl(${(orb.hue + 180) % 360}, 95%, 75%)`;
+          ctx.beginPath();
+          ctx.arc(x1, y1, 5 * sc, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+
+    // Flying pin
+    if (flying) {
+      // trail
+      for (let i = 0; i < flying.trail.length; i++) {
+        const t = flying.trail[i];
+        const k = i / flying.trail.length;
+        ctx.fillStyle = `rgba(255, 230, 255, ${k * 0.3})`;
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, 4 * k + 1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // body
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(flying.x, flying.y);
+      ctx.lineTo(flying.x, flying.y + 28);
+      ctx.stroke();
+      // head
+      ctx.fillStyle = 'rgba(255, 217, 244, 0.4)';
+      ctx.beginPath();
+      ctx.arc(flying.x, flying.y, 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffd9f4';
+      ctx.beginPath();
+      ctx.arc(flying.x, flying.y, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Launcher hint at bottom
+    if (state === 'play' && !flying) {
+      const t = performance.now() / 240;
+      const pulse = 0.6 + Math.sin(t) * 0.4;
+      const lx = W / 2, ly = H * 0.88;
+      ctx.strokeStyle = `rgba(180, 200, 255, ${0.18 + 0.22 * pulse})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(lx, ly, 16 + pulse * 4, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = `rgba(180, 200, 255, ${0.4 * pulse})`;
+      ctx.beginPath();
+      ctx.arc(lx, ly, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Particles
+    for (const p of particles) {
+      ctx.fillStyle = `hsla(${p.hue}, 95%, 65%, ${p.life})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+
+    if (levelMsgFrames > 0) {
+      const a = Math.min(1, levelMsgFrames / 30);
+      ctx.fillStyle = `rgba(255,255,255,${a})`;
+      ctx.font = '700 26px -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('LEVEL ' + level + ' CLEAR', W / 2, H * 0.72);
+      ctx.font = '500 14px -apple-system, sans-serif';
+      ctx.fillStyle = `rgba(255,179,225,${a * 0.9})`;
+      ctx.fillText('+' + (100 * level), W / 2, H * 0.72 + 24);
+    }
+  }
+
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
