@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Pendula</title>
+<style>
+  :root{
+    --bg0:#070815;
+    --bg1:#11132a;
+    --ink:#eaf2ff;
+    --r:#ff5577;
+    --g:#5be4a0;
+    --b:#5aa9ff;
+    --y:#ffd35a;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{
+    width:100%;height:100%;overflow:hidden;background:var(--bg0);
+    color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue","Hiragino Sans",sans-serif;
+    -webkit-tap-highlight-color:transparent;user-select:none;
+    touch-action:manipulation;
+  }
+  #wrap{
+    position:fixed;inset:0;
+    background:
+      radial-gradient(120% 80% at 50% 0%, #1c2050 0%, var(--bg1) 40%, var(--bg0) 100%);
+  }
+  canvas{display:block;width:100%;height:100%;touch-action:none}
+  .hud{
+    position:absolute;top:env(safe-area-inset-top,8px);left:0;right:0;
+    padding:10px 14px;display:flex;justify-content:space-between;align-items:center;
+    pointer-events:none;font-weight:600;letter-spacing:.04em;
+    text-shadow:0 1px 6px rgba(0,0,0,.6);
+  }
+  .hud .center{display:flex;gap:6px;align-items:center}
+  .heart{width:10px;height:10px;border-radius:50%;background:var(--r);box-shadow:0 0 10px var(--r)}
+  .heart.dead{background:#3a3a4a;box-shadow:none}
+  .label{font-size:13px;opacity:.85}
+  .val{font-size:20px;font-variant-numeric:tabular-nums}
+  .back{
+    position:absolute;left:10px;bottom:env(safe-area-inset-bottom,10px);
+    color:#aab;font-size:12px;text-decoration:none;opacity:.7;
+    padding:8px 10px;
+  }
+  .overlay{
+    position:absolute;inset:0;display:flex;flex-direction:column;
+    justify-content:center;align-items:center;text-align:center;padding:24px;
+    background:radial-gradient(120% 80% at 50% 30%, rgba(20,24,60,.7), rgba(7,8,21,.92));
+    backdrop-filter:blur(4px);
+    transition:opacity .25s ease;
+  }
+  .overlay.hide{opacity:0;pointer-events:none}
+  .title{
+    font-size:42px;font-weight:800;letter-spacing:.04em;
+    background:linear-gradient(90deg,var(--r),var(--y),var(--g),var(--b));
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    margin-bottom:8px;
+  }
+  .sub{font-size:14px;opacity:.8;line-height:1.6;max-width:300px;margin-bottom:22px}
+  .btn{
+    appearance:none;border:1px solid rgba(255,255,255,.25);
+    background:rgba(255,255,255,.08);color:var(--ink);
+    padding:12px 26px;font-size:16px;font-weight:700;border-radius:999px;
+    letter-spacing:.06em;cursor:pointer;
+  }
+  .btn:active{transform:scale(.97)}
+  .demo{
+    display:flex;gap:14px;margin-bottom:18px;align-items:flex-end;height:64px
+  }
+  .demo .col{
+    width:18px;border-radius:4px 4px 0 0;
+    box-shadow:0 0 16px currentColor;
+  }
+  .legend{font-size:11px;opacity:.6;margin-top:14px;letter-spacing:.1em}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="cv"></canvas>
+  <div class="hud">
+    <div><div class="label">SCORE</div><div class="val" id="score">0</div></div>
+    <div class="center" id="hearts">
+      <div class="heart"></div><div class="heart"></div><div class="heart"></div>
+    </div>
+    <div style="text-align:right"><div class="label">TIME</div><div class="val" id="time">60</div></div>
+  </div>
+  <a class="back" href="../../index.html">← gallery</a>
+
+  <div class="overlay" id="ovStart">
+    <div class="title">PENDULA</div>
+    <div class="demo">
+      <div class="col" style="height:40%;background:var(--r);color:var(--r)"></div>
+      <div class="col" style="height:75%;background:var(--g);color:var(--g)"></div>
+      <div class="col" style="height:55%;background:var(--b);color:var(--b)"></div>
+    </div>
+    <div class="sub">揺れる振り子のオーブをタップして切り離し、<br>下の同じ色のゾーンへ落とそう。</div>
+    <button class="btn" id="btnStart">START</button>
+    <div class="legend">TAP TO CUT  ·  MATCH THE COLOR</div>
+  </div>
+
+  <div class="overlay hide" id="ovEnd">
+    <div class="title" id="endTitle">TIME UP</div>
+    <div class="sub"><span id="finalLabel">SCORE</span><br><span style="font-size:38px;font-weight:800" id="finalScore">0</span></div>
+    <button class="btn" id="btnRetry">RETRY</button>
+  </div>
+</div>
+<script>
+(()=>{
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  let W=0,H=0,DPR=1;
+  const colors = {r:'#ff5577', g:'#5be4a0', b:'#5aa9ff'};
+  const colorKeys = ['r','g','b'];
+
+  function resize(){
+    DPR = Math.min(window.devicePixelRatio||1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    cv.width = W*DPR; cv.height = H*DPR;
+    cv.style.width = W+'px'; cv.style.height = H+'px';
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  window.addEventListener('resize', resize, {passive:true});
+  resize();
+
+  // game state
+  let pendulums = [];
+  let drops = [];   // released orbs falling
+  let particles = [];
+  let zones = [];   // bottom color zones
+  let stars = [];
+  let score = 0;
+  let lives = 3;
+  let timeLeft = 60;
+  let lastT = 0;
+  let elapsed = 0;
+  let running = false;
+  let shakeT = 0;
+  let combo = 0;
+
+  // initial stars
+  for(let i=0;i<60;i++){
+    stars.push({x:Math.random(), y:Math.random()*0.6, s:Math.random()*1.2+0.3, t:Math.random()*Math.PI*2});
+  }
+
+  function buildZones(){
+    zones = [];
+    const bottomY = H - 14;
+    const zoneH = Math.max(64, H*0.10);
+    const zoneTop = bottomY - zoneH;
+    const w = W/3;
+    for(let i=0;i<3;i++){
+      zones.push({
+        x: i*w, y: zoneTop, w:w, h:zoneH, color: colorKeys[i],
+        pulse:0
+      });
+    }
+  }
+
+  function spawnPendulum(slot){
+    // pivot points near top
+    const pivotsX = [W*0.22, W*0.5, W*0.78];
+    const px = pivotsX[slot];
+    const py = Math.max(40, H*0.10);
+    const len = Math.min(H*0.30, 220) + Math.random()*40;
+    const amp = 0.6 + Math.random()*0.4; // radians
+    const period = 1.4 + Math.random()*1.2;
+    const phase = Math.random()*Math.PI*2;
+    const color = colorKeys[Math.floor(Math.random()*3)];
+    return {
+      slot, px, py, len, amp, period, phase, color,
+      alive:true, regrowAt:0, born: performance.now()
+    };
+  }
+
+  function reset(){
+    score=0; lives=3; timeLeft=60; elapsed=0;
+    drops=[]; particles=[]; combo=0; shakeT=0;
+    pendulums = [spawnPendulum(0), spawnPendulum(1), spawnPendulum(2)];
+    buildZones();
+    updateHud();
+  }
+
+  function updateHud(){
+    document.getElementById('score').textContent = score;
+    document.getElementById('time').textContent = Math.max(0, Math.ceil(timeLeft));
+    const hearts = document.getElementById('hearts').children;
+    for(let i=0;i<3;i++){
+      hearts[i].classList.toggle('dead', i>=lives);
+    }
+  }
+
+  function pendulumPos(p, t){
+    const angle = Math.sin((t-p.born)/1000 / p.period * Math.PI*2 + p.phase) * p.amp;
+    const x = p.px + Math.sin(angle)*p.len;
+    const y = p.py + Math.cos(angle)*p.len;
+    // velocity (numerical)
+    const dt = 0.016;
+    const angle2 = Math.sin((t-p.born)/1000 / p.period * Math.PI*2 + p.phase + dt*Math.PI*2/p.period) * p.amp;
+    const x2 = p.px + Math.sin(angle2)*p.len;
+    const y2 = p.py + Math.cos(angle2)*p.len;
+    return {x,y,vx:(x2-x)/dt, vy:(y2-y)/dt, angle};
+  }
+
+  function tryCut(tx,ty){
+    const t = performance.now();
+    let hit = null;
+    let bestD = 36; // hit radius
+    for(const p of pendulums){
+      if(!p.alive) continue;
+      const pos = pendulumPos(p,t);
+      const d = Math.hypot(pos.x-tx, pos.y-ty);
+      if(d<bestD){ bestD=d; hit={p,pos}; }
+    }
+    if(!hit) return;
+    const {p,pos}=hit;
+    p.alive=false;
+    p.regrowAt = performance.now() + 700;
+    drops.push({
+      x:pos.x, y:pos.y,
+      vx:pos.vx*0.9, vy:Math.max(0,pos.vy*0.6)+40,
+      color:p.color, slot:p.slot,
+      r: 18, born: performance.now(),
+      trail: []
+    });
+    spawnRing(pos.x,pos.y,p.color);
+    if(navigator.vibrate) navigator.vibrate(8);
+  }
+
+  function spawnRing(x,y,colorKey){
+    particles.push({type:'ring',x,y,r:8,maxR:60,life:1,color:colorKey});
+  }
+
+  function spawnBurst(x,y,colorKey,count=18){
+    for(let i=0;i<count;i++){
+      const a=Math.random()*Math.PI*2;
+      const sp=80+Math.random()*220;
+      particles.push({type:'spark',x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp - 60,life:1, color:colorKey});
+    }
+  }
+
+  function spawnShatter(x,y){
+    for(let i=0;i<14;i++){
+      const a=Math.random()*Math.PI*2;
+      const sp=60+Math.random()*180;
+      particles.push({type:'shard',x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-40,life:1,rot:Math.random()*Math.PI,vr:(Math.random()-0.5)*8});
+    }
+  }
+
+  function step(dt){
+    elapsed += dt;
+    timeLeft -= dt;
+    if(timeLeft<=0){ end(false); return; }
+
+    // regrow pendulums
+    const t = performance.now();
+    for(const p of pendulums){
+      if(!p.alive && t>p.regrowAt){
+        const slot = p.slot;
+        const np = spawnPendulum(slot);
+        // tighten difficulty over time
+        const diff = Math.min(1, elapsed/45);
+        np.period *= (1 - diff*0.35);
+        Object.assign(p, np);
+      }
+    }
+
+    // physics: drops
+    for(const d of drops){
+      d.vy += 1400*dt;
+      d.x += d.vx*dt;
+      d.y += d.vy*dt;
+      d.trail.push({x:d.x,y:d.y});
+      if(d.trail.length>10) d.trail.shift();
+    }
+    // landing
+    drops = drops.filter(d=>{
+      // find zone at this x when y reaches zone top
+      const z = zones.find(z=> d.x>=z.x && d.x<z.x+z.w);
+      if(!z) return d.y < H+50; // off screen out
+      if(d.y >= z.y){
+        if(z.color === d.color){
+          score += 10 + combo*2;
+          combo += 1;
+          z.pulse = 1;
+          spawnBurst(d.x, z.y+8, d.color, 24);
+          if(navigator.vibrate) navigator.vibrate(14);
+        } else {
+          lives -= 1;
+          combo = 0;
+          shakeT = 0.35;
+          spawnShatter(d.x, z.y+8);
+          if(navigator.vibrate) navigator.vibrate([20,40,20]);
+        }
+        updateHud();
+        if(lives<=0){ end(true); }
+        return false;
+      }
+      return true;
+    });
+
+    // particles
+    for(const p of particles){
+      if(p.type==='ring'){
+        p.r += (p.maxR-p.r)*Math.min(1, dt*6);
+        p.life -= dt*1.6;
+      } else if(p.type==='spark'){
+        p.vy += 600*dt;
+        p.x += p.vx*dt;
+        p.y += p.vy*dt;
+        p.life -= dt*1.4;
+      } else if(p.type==='shard'){
+        p.vy += 800*dt;
+        p.x += p.vx*dt;
+        p.y += p.vy*dt;
+        p.rot += p.vr*dt;
+        p.life -= dt*1.0;
+      }
+    }
+    particles = particles.filter(p=>p.life>0);
+    for(const z of zones) z.pulse = Math.max(0, z.pulse - dt*2);
+    shakeT = Math.max(0, shakeT - dt);
+
+    // stars twinkle
+    for(const s of stars) s.t += dt*2;
+  }
+
+  function draw(){
+    let ox=0, oy=0;
+    if(shakeT>0){
+      ox = (Math.random()-0.5)*shakeT*40;
+      oy = (Math.random()-0.5)*shakeT*40;
+    }
+    ctx.save();
+    ctx.translate(ox,oy);
+    // clear
+    ctx.clearRect(-50,-50,W+100,H+100);
+
+    // stars
+    for(const s of stars){
+      const a = 0.3 + 0.4*Math.sin(s.t);
+      ctx.fillStyle = `rgba(255,255,255,${a*0.7})`;
+      ctx.beginPath();
+      ctx.arc(s.x*W, s.y*H, s.s, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    // zones
+    const t = performance.now();
+    for(const z of zones){
+      const c = colors[z.color];
+      // base band
+      const grad = ctx.createLinearGradient(0,z.y,0,z.y+z.h);
+      grad.addColorStop(0, hexToRGBA(c, 0.05+0.4*z.pulse));
+      grad.addColorStop(1, hexToRGBA(c, 0.30+0.5*z.pulse));
+      ctx.fillStyle = grad;
+      ctx.fillRect(z.x, z.y, z.w, z.h);
+      // top line
+      ctx.fillStyle = hexToRGBA(c, 0.6+0.4*z.pulse);
+      ctx.fillRect(z.x, z.y, z.w, 2);
+      // dividers
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      if(z!==zones[0]) ctx.fillRect(z.x, z.y, 1, z.h);
+      // soft pulse glow on hit
+      if(z.pulse>0){
+        ctx.fillStyle = hexToRGBA(c, 0.25*z.pulse);
+        ctx.fillRect(z.x, z.y-30, z.w, 30);
+      }
+      // color label
+      ctx.fillStyle = hexToRGBA(c, 0.55);
+      ctx.font = '600 11px -apple-system,sans-serif';
+      ctx.textAlign='center';
+      ctx.fillText(z.color.toUpperCase(), z.x+z.w/2, z.y+z.h-10);
+    }
+
+    // pendulums
+    for(const p of pendulums){
+      if(!p.alive) continue;
+      const pos = pendulumPos(p,t);
+      // pivot
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.beginPath();
+      ctx.arc(p.px, p.py, 3, 0, Math.PI*2);
+      ctx.fill();
+      // rope
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(p.px, p.py);
+      ctx.lineTo(pos.x, pos.y);
+      ctx.stroke();
+      // orb
+      drawOrb(pos.x, pos.y, 18, p.color);
+    }
+
+    // drops + trails
+    for(const d of drops){
+      // trail
+      for(let i=0;i<d.trail.length;i++){
+        const tp = d.trail[i];
+        const a = i/d.trail.length;
+        ctx.fillStyle = hexToRGBA(colors[d.color], a*0.5);
+        ctx.beginPath();
+        ctx.arc(tp.x, tp.y, d.r*a*0.8, 0, Math.PI*2);
+        ctx.fill();
+      }
+      drawOrb(d.x, d.y, d.r, d.color);
+    }
+
+    // particles
+    for(const p of particles){
+      if(p.type==='ring'){
+        ctx.strokeStyle = hexToRGBA(colors[p.color], p.life*0.7);
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+        ctx.stroke();
+      } else if(p.type==='spark'){
+        ctx.fillStyle = hexToRGBA(colors[p.color], p.life);
+        ctx.beginPath();
+        ctx.arc(p.x,p.y,2.5*p.life+0.5,0,Math.PI*2);
+        ctx.fill();
+      } else if(p.type==='shard'){
+        ctx.save();
+        ctx.translate(p.x,p.y);
+        ctx.rotate(p.rot);
+        ctx.fillStyle = `rgba(255,255,255,${p.life*0.8})`;
+        ctx.fillRect(-3,-1,6,2);
+        ctx.restore();
+      }
+    }
+
+    // combo indicator
+    if(combo>=2){
+      ctx.font = '700 18px -apple-system,sans-serif';
+      ctx.fillStyle = `rgba(255,235,160,${0.7})`;
+      ctx.textAlign='center';
+      ctx.fillText(`COMBO ×${combo}`, W/2, 80);
+    }
+
+    ctx.restore();
+  }
+
+  function drawOrb(x,y,r,colorKey){
+    const c = colors[colorKey];
+    // outer glow
+    const g = ctx.createRadialGradient(x,y,0,x,y,r*3);
+    g.addColorStop(0, hexToRGBA(c,0.7));
+    g.addColorStop(1, hexToRGBA(c,0));
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x,y,r*3,0,Math.PI*2);
+    ctx.fill();
+    // core
+    const g2 = ctx.createRadialGradient(x-r*0.3,y-r*0.3,0,x,y,r);
+    g2.addColorStop(0, '#ffffff');
+    g2.addColorStop(0.4, c);
+    g2.addColorStop(1, hexToRGBA(c,0.6));
+    ctx.fillStyle = g2;
+    ctx.beginPath();
+    ctx.arc(x,y,r,0,Math.PI*2);
+    ctx.fill();
+  }
+
+  function hexToRGBA(hex, a){
+    const n = parseInt(hex.slice(1),16);
+    const r=(n>>16)&255, g=(n>>8)&255, b=n&255;
+    return `rgba(${r},${g},${b},${a})`;
+  }
+
+  function loop(t){
+    if(!running) return;
+    if(!lastT) lastT = t;
+    const dt = Math.min(0.05, (t-lastT)/1000);
+    lastT = t;
+    step(dt);
+    draw();
+    updateHud();
+    requestAnimationFrame(loop);
+  }
+
+  function start(){
+    document.getElementById('ovStart').classList.add('hide');
+    document.getElementById('ovEnd').classList.add('hide');
+    reset();
+    running = true;
+    lastT = 0;
+    requestAnimationFrame(loop);
+  }
+
+  function end(noLives){
+    running = false;
+    document.getElementById('endTitle').textContent = noLives ? 'GAME OVER' : 'TIME UP';
+    document.getElementById('finalScore').textContent = score;
+    document.getElementById('ovEnd').classList.remove('hide');
+  }
+
+  // input
+  function getXY(e){
+    const rect = cv.getBoundingClientRect();
+    const t = e.touches ? e.touches[0] : e;
+    return {x: t.clientX-rect.left, y: t.clientY-rect.top};
+  }
+  cv.addEventListener('pointerdown', (e)=>{
+    if(!running) return;
+    e.preventDefault();
+    const p = getXY(e);
+    tryCut(p.x, p.y);
+  }, {passive:false});
+
+  document.getElementById('btnStart').addEventListener('click', start);
+  document.getElementById('btnRetry').addEventListener('click', start);
+
+  // idle render so background looks alive on the menu
+  function idleLoop(){
+    if(running) return;
+    // animate stars only
+    for(const s of stars) s.t += 0.02;
+    ctx.clearRect(0,0,W,H);
+    for(const s of stars){
+      const a = 0.3 + 0.4*Math.sin(s.t);
+      ctx.fillStyle = `rgba(255,255,255,${a*0.6})`;
+      ctx.beginPath();
+      ctx.arc(s.x*W, s.y*H, s.s, 0, Math.PI*2);
+      ctx.fill();
+    }
+    requestAnimationFrame(idleLoop);
+  }
+  buildZones();
+  idleLoop();
+})();
+</script>
+</body>
+</html>
