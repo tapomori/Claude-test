@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>Halo Bind</title>
+<style>
+  :root {
+    --bg-0: #07071a;
+    --bg-1: #15103a;
+    --ink: #e8e6ff;
+    --accent: #ffd24a;
+    --danger: #ff4f7a;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0;
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: radial-gradient(circle at 50% 20%, var(--bg-1), var(--bg-0) 70%);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic", sans-serif;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #game {
+    position: fixed;
+    inset: 0;
+    touch-action: none;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+  .hud {
+    position: fixed;
+    top: env(safe-area-inset-top, 0);
+    left: 0; right: 0;
+    padding: 14px 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    pointer-events: none;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    z-index: 5;
+    text-shadow: 0 0 12px rgba(0,0,0,0.5);
+  }
+  .hud .stat {
+    background: rgba(10, 8, 30, 0.55);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 14px;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+  .hud .stat .v { font-size: 18px; margin-left: 6px; }
+  .hud .target {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .hud .target .swatch {
+    width: 18px; height: 18px; border-radius: 50%;
+    box-shadow: 0 0 12px currentColor;
+  }
+  .back {
+    position: fixed;
+    bottom: 14px;
+    left: 14px;
+    z-index: 10;
+    font-size: 12px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: rgba(10, 8, 30, 0.6);
+    color: var(--ink);
+    text-decoration: none;
+    border: 1px solid rgba(255,255,255,0.1);
+    letter-spacing: 0.08em;
+  }
+  .overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(7, 7, 26, 0.85);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 20;
+    text-align: center;
+    padding: 24px;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+  .overlay h1 {
+    margin: 0 0 8px 0;
+    font-size: 38px;
+    letter-spacing: 0.16em;
+    background: linear-gradient(90deg, #7df9ff, #c1a3ff, #ffd24a);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    filter: drop-shadow(0 0 16px rgba(193, 163, 255, 0.4));
+  }
+  .overlay .sub {
+    font-size: 13px;
+    opacity: 0.85;
+    max-width: 320px;
+    line-height: 1.7;
+    margin: 4px 0 22px;
+  }
+  .overlay .score-big {
+    font-size: 48px;
+    font-weight: 800;
+    margin: 6px 0 2px;
+  }
+  .overlay .score-lbl {
+    font-size: 12px;
+    letter-spacing: 0.3em;
+    opacity: 0.7;
+    margin-bottom: 18px;
+  }
+  .btn {
+    appearance: none;
+    border: 0;
+    background: linear-gradient(135deg, #7df9ff, #c1a3ff);
+    color: #08081e;
+    font-weight: 800;
+    font-size: 16px;
+    letter-spacing: 0.14em;
+    padding: 14px 36px;
+    border-radius: 999px;
+    box-shadow: 0 8px 24px rgba(125, 249, 255, 0.25);
+    cursor: pointer;
+  }
+  .btn:active { transform: translateY(1px) scale(0.98); }
+  .hint {
+    margin-top: 18px;
+    font-size: 11px;
+    opacity: 0.55;
+    letter-spacing: 0.2em;
+  }
+  .demo {
+    display: flex;
+    gap: 18px;
+    justify-content: center;
+    margin: 8px 0 10px;
+  }
+  .demo .dot {
+    width: 22px; height: 22px; border-radius: 50%;
+    box-shadow: 0 0 10px currentColor;
+  }
+  .demo .arrow {
+    align-self: center;
+    opacity: 0.7;
+  }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="game">
+  <canvas id="cv"></canvas>
+</div>
+
+<div class="hud" id="hud">
+  <div class="stat">SCORE<span class="v" id="score">0</span></div>
+  <div class="stat target">CATCH<span class="swatch" id="targetSwatch"></span></div>
+  <div class="stat">TIME<span class="v" id="time">60</span></div>
+</div>
+
+<a class="back" href="../../index.html">← GALLERY</a>
+
+<div class="overlay" id="startOverlay">
+  <h1>HALO BIND</h1>
+  <div class="sub">
+    指でぐるっと囲んだ瞬間、輪が閉じて中のオーブを束ねる。<br />
+    指定色だけ束ねろ。違う色や赤い棘は減点。
+  </div>
+  <div class="demo">
+    <div class="dot" style="color:#7df9ff;background:#7df9ff"></div>
+    <div class="dot" style="color:#ffd24a;background:#ffd24a"></div>
+    <div class="dot" style="color:#ff4f7a;background:#ff4f7a"></div>
+  </div>
+  <button class="btn" id="startBtn">START</button>
+  <div class="hint">DRAG TO DRAW A LOOP</div>
+</div>
+
+<div class="overlay hidden" id="endOverlay">
+  <h1 id="endTitle">TIME UP</h1>
+  <div class="score-lbl">FINAL SCORE</div>
+  <div class="score-big" id="finalScore">0</div>
+  <div class="sub" id="endSub"></div>
+  <button class="btn" id="againBtn">AGAIN</button>
+  <div class="hint">DRAG TO DRAW A LOOP</div>
+</div>
+
+<script>
+(() => {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const timeEl = document.getElementById('time');
+  const targetSwatch = document.getElementById('targetSwatch');
+  const startOverlay = document.getElementById('startOverlay');
+  const endOverlay = document.getElementById('endOverlay');
+  const startBtn = document.getElementById('startBtn');
+  const againBtn = document.getElementById('againBtn');
+  const finalScoreEl = document.getElementById('finalScore');
+  const endTitleEl = document.getElementById('endTitle');
+  const endSubEl = document.getElementById('endSub');
+
+  let W = 0, H = 0, DPR = 1;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    cv.width = W * DPR;
+    cv.height = H * DPR;
+    cv.style.width = W + 'px';
+    cv.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', () => setTimeout(resize, 100));
+
+  const COLORS = [
+    { id: 'cyan',   hex: '#7df9ff', glow: 'rgba(125,249,255,0.9)' },
+    { id: 'gold',   hex: '#ffd24a', glow: 'rgba(255,210,74,0.9)'  },
+    { id: 'lilac',  hex: '#c1a3ff', glow: 'rgba(193,163,255,0.9)' },
+    { id: 'lime',   hex: '#9fff7a', glow: 'rgba(159,255,122,0.9)' },
+  ];
+  const DANGER = { id: 'danger', hex: '#ff4f7a', glow: 'rgba(255,79,122,0.95)' };
+
+  let orbs = [];
+  let particles = [];
+  let trails = []; // closed loops fading
+  let path = []; // current drawing path
+  let drawing = false;
+  let score = 0;
+  let timeLeft = 60;
+  let targetColor = COLORS[0];
+  let running = false;
+  let lastT = 0;
+  let spawnCD = 0;
+  let combo = 0;
+  let comboFlashT = 0;
+  let comboFlashText = '';
+  let shake = 0;
+  let timerAcc = 0;
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+  function spawnOrb() {
+    const isDanger = Math.random() < 0.18;
+    const color = isDanger ? DANGER : pick(COLORS);
+    const r = isDanger ? rand(16, 20) : rand(18, 26);
+    // spawn just outside, drifting in
+    const side = Math.floor(Math.random() * 4);
+    let x, y, vx, vy;
+    const margin = 40;
+    if (side === 0) { x = -margin; y = rand(80, H - 80); vx = rand(0.3, 0.9); vy = rand(-0.3, 0.3); }
+    else if (side === 1) { x = W + margin; y = rand(80, H - 80); vx = -rand(0.3, 0.9); vy = rand(-0.3, 0.3); }
+    else if (side === 2) { x = rand(40, W - 40); y = -margin; vx = rand(-0.3, 0.3); vy = rand(0.3, 0.9); }
+    else { x = rand(40, W - 40); y = H + margin; vx = rand(-0.3, 0.3); vy = -rand(0.3, 0.9); }
+    orbs.push({
+      x, y, vx, vy, r,
+      color, isDanger,
+      phase: Math.random() * Math.PI * 2,
+      life: 0,
+      maxLife: rand(11, 18),
+      bornFlash: 1.0,
+      caught: false,
+    });
+  }
+
+  function spawnParticles(x, y, color, n, scale=1) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = rand(1.2, 4) * scale;
+      particles.push({
+        x, y,
+        vx: Math.cos(a) * s,
+        vy: Math.sin(a) * s,
+        life: rand(0.5, 1.0),
+        max: 1.0,
+        color,
+        size: rand(2, 4) * scale,
+      });
+    }
+  }
+
+  function startGame() {
+    score = 0;
+    timeLeft = 60;
+    timerAcc = 0;
+    orbs = [];
+    particles = [];
+    trails = [];
+    path = [];
+    drawing = false;
+    spawnCD = 0;
+    combo = 0;
+    comboFlashT = 0;
+    shake = 0;
+    running = true;
+    pickTarget();
+    // pre-spawn
+    for (let i = 0; i < 6; i++) spawnOrb();
+    scoreEl.textContent = '0';
+    timeEl.textContent = '60';
+    startOverlay.classList.add('hidden');
+    endOverlay.classList.add('hidden');
+    lastT = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  function pickTarget() {
+    const prev = targetColor;
+    do {
+      targetColor = pick(COLORS);
+    } while (prev && targetColor.id === prev.id && COLORS.length > 1);
+    targetSwatch.style.background = targetColor.hex;
+    targetSwatch.style.color = targetColor.hex;
+  }
+
+  function endGame() {
+    running = false;
+    finalScoreEl.textContent = score;
+    let title = 'TIME UP';
+    let sub = '';
+    if (score >= 1500) { title = 'STELLAR'; sub = '銀河級の輪さばき。'; }
+    else if (score >= 900) { title = 'BRILLIANT'; sub = 'いい手触り、いい連鎖。'; }
+    else if (score >= 500) { title = 'GOOD'; sub = '輪を大きく狙うと伸びるよ。'; }
+    else { title = 'TIME UP'; sub = '同色をまとめて束ねるのがコツ。'; }
+    endTitleEl.textContent = title;
+    endSubEl.textContent = sub;
+    endOverlay.classList.remove('hidden');
+  }
+
+  // Point-in-polygon (ray casting)
+  function pointInPoly(px, py, poly) {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const xi = poly[i].x, yi = poly[i].y;
+      const xj = poly[j].x, yj = poly[j].y;
+      const intersect = ((yi > py) !== (yj > py)) &&
+        (px < (xj - xi) * (py - yi) / ((yj - yi) || 1e-9) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+
+  function polyArea(poly) {
+    let a = 0;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      a += (poly[j].x + poly[i].x) * (poly[j].y - poly[i].y);
+    }
+    return Math.abs(a) * 0.5;
+  }
+
+  function closeLoop() {
+    if (path.length < 8) { path = []; return; }
+    // If endpoint near start, treat as closed; else close by connecting last to first
+    const area = polyArea(path);
+    if (area < 1800) { path = []; return; } // too small
+
+    // Determine captures
+    let hits = [];
+    let dangerHits = 0;
+    let goodHits = 0;
+    let wrongHits = 0;
+    for (const o of orbs) {
+      if (o.caught) continue;
+      if (pointInPoly(o.x, o.y, path)) {
+        hits.push(o);
+        if (o.isDanger) dangerHits++;
+        else if (o.color.id === targetColor.id) goodHits++;
+        else wrongHits++;
+      }
+    }
+
+    // Apply effects
+    let gained = 0;
+    let lostFlash = false;
+    if (dangerHits > 0) {
+      // touching danger inside loop = penalty, combo reset
+      gained -= 60 * dangerHits;
+      combo = 0;
+      shake = Math.min(20, shake + 14);
+      lostFlash = true;
+      if (navigator.vibrate) navigator.vibrate([30, 40, 30]);
+    } else {
+      if (goodHits > 0) {
+        combo = Math.min(combo + 1, 10);
+        const mult = 1 + (combo - 1) * 0.4;
+        // bonus for binding multiple at once
+        const groupBonus = goodHits >= 3 ? 1.8 : goodHits === 2 ? 1.35 : 1;
+        gained += Math.round(goodHits * 80 * mult * groupBonus);
+        comboFlashText = goodHits >= 3
+          ? `×${goodHits}  BIND  +${gained}`
+          : (combo >= 2 ? `COMBO ×${combo}  +${gained}` : `+${gained}`);
+        comboFlashT = 1.0;
+        if (navigator.vibrate) navigator.vibrate(15);
+      }
+      if (wrongHits > 0) {
+        // wrong color inside loop: small penalty per
+        gained -= 25 * wrongHits;
+        combo = 0;
+      }
+      if (goodHits === 0 && wrongHits === 0) {
+        // empty loop: no penalty, no combo gain
+      }
+    }
+
+    // Apply captures animation
+    for (const o of hits) {
+      o.caught = true;
+      const c = o.isDanger ? DANGER : o.color;
+      spawnParticles(o.x, o.y, c.hex, o.isDanger ? 22 : 16, o.isDanger ? 1.4 : 1.1);
+    }
+
+    score = Math.max(0, score + gained);
+    scoreEl.textContent = score;
+
+    // After a successful good catch: rotate target sometimes
+    if (goodHits > 0 && Math.random() < 0.35) {
+      pickTarget();
+    }
+
+    // Save trail for fading visualization
+    trails.push({
+      pts: path.slice(),
+      life: 0.6,
+      max: 0.6,
+      bad: dangerHits > 0,
+      good: goodHits > 0 && dangerHits === 0,
+    });
+
+    if (lostFlash) {
+      // also penalty time? keep mild
+    }
+
+    path = [];
+  }
+
+  function tap(x, y) {
+    // not used, we use drag only
+  }
+
+  function onStart(x, y) {
+    if (!running) return;
+    drawing = true;
+    path = [{ x, y }];
+  }
+  function onMove(x, y) {
+    if (!drawing || !running) return;
+    const last = path[path.length - 1];
+    const dx = x - last.x, dy = y - last.y;
+    if (dx * dx + dy * dy > 16) {
+      path.push({ x, y });
+      // cap length
+      if (path.length > 220) path.shift();
+    }
+  }
+  function onEnd() {
+    if (!drawing) return;
+    drawing = false;
+    closeLoop();
+  }
+
+  function touchPos(e) {
+    const t = e.touches[0] || e.changedTouches[0];
+    return { x: t.clientX, y: t.clientY };
+  }
+
+  cv.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const p = touchPos(e); onStart(p.x, p.y);
+  }, { passive: false });
+  cv.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    const p = touchPos(e); onMove(p.x, p.y);
+  }, { passive: false });
+  cv.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    onEnd();
+  }, { passive: false });
+  cv.addEventListener('touchcancel', (e) => {
+    e.preventDefault();
+    onEnd();
+  }, { passive: false });
+  // Mouse fallback for desktop testing
+  cv.addEventListener('mousedown', (e) => onStart(e.clientX, e.clientY));
+  cv.addEventListener('mousemove', (e) => { if (e.buttons) onMove(e.clientX, e.clientY); });
+  cv.addEventListener('mouseup', onEnd);
+  cv.addEventListener('mouseleave', onEnd);
+
+  startBtn.addEventListener('click', startGame);
+  againBtn.addEventListener('click', startGame);
+
+  function drawBackground(t) {
+    // soft moving radial accents
+    ctx.fillStyle = 'rgba(7,7,26,1)';
+    ctx.fillRect(0, 0, W, H);
+    const g = ctx.createRadialGradient(W/2, H*0.25, 0, W/2, H*0.25, Math.max(W,H)*0.8);
+    g.addColorStop(0, 'rgba(60, 40, 130, 0.35)');
+    g.addColorStop(1, 'rgba(7,7,26,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    // subtle drifting dust
+    ctx.globalAlpha = 0.3;
+    for (let i = 0; i < 20; i++) {
+      const x = (i * 73 + t * 8) % W;
+      const y = (i * 131 + t * 4) % H;
+      ctx.fillStyle = i % 3 === 0 ? '#7df9ff' : '#c1a3ff';
+      ctx.beginPath(); ctx.arc(x, y, 1.2, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawOrb(o, t) {
+    const c = o.isDanger ? DANGER : o.color;
+    const pulse = 1 + Math.sin(t * 4 + o.phase) * 0.06;
+    const r = o.r * pulse;
+
+    // glow
+    const grd = ctx.createRadialGradient(o.x, o.y, 0, o.x, o.y, r * 3);
+    grd.addColorStop(0, c.glow);
+    grd.addColorStop(0.4, c.glow.replace('0.9', '0.25').replace('0.95', '0.25'));
+    grd.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grd;
+    ctx.beginPath(); ctx.arc(o.x, o.y, r * 3, 0, Math.PI*2); ctx.fill();
+
+    // body
+    ctx.fillStyle = c.hex;
+    ctx.beginPath(); ctx.arc(o.x, o.y, r, 0, Math.PI*2); ctx.fill();
+
+    if (o.isDanger) {
+      // spikes
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      const spikes = 6;
+      for (let i = 0; i < spikes; i++) {
+        const a = t * 2 + (i / spikes) * Math.PI * 2;
+        const x1 = o.x + Math.cos(a) * (r * 0.8);
+        const y1 = o.y + Math.sin(a) * (r * 0.8);
+        const x2 = o.x + Math.cos(a) * (r * 1.6);
+        const y2 = o.y + Math.sin(a) * (r * 1.6);
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      }
+      // inner ring
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(o.x, o.y, r * 0.55, 0, Math.PI*2); ctx.stroke();
+    } else {
+      // inner highlight
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.beginPath(); ctx.arc(o.x - r*0.35, o.y - r*0.35, r*0.35, 0, Math.PI*2); ctx.fill();
+
+      // target indicator: ring if matches target
+      if (o.color.id === targetColor.id) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(o.x, o.y, r + 6 + Math.sin(t*5 + o.phase)*1.5, 0, Math.PI*2); ctx.stroke();
+      }
+    }
+
+    // born flash
+    if (o.bornFlash > 0) {
+      ctx.globalAlpha = o.bornFlash;
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(o.x, o.y, r + (1 - o.bornFlash) * 22, 0, Math.PI*2); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function drawPath(pts, opts={}) {
+    if (pts.length < 2) return;
+    const { closed=false, color='rgba(255,255,255,0.9)', width=3, glow=14 } = opts;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.shadowBlur = glow;
+    ctx.shadowColor = color;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) {
+      ctx.lineTo(pts[i].x, pts[i].y);
+    }
+    if (closed) ctx.closePath();
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+
+  function loop(now) {
+    if (!running) return;
+    let dt = (now - lastT) / 1000;
+    lastT = now;
+    if (dt > 0.05) dt = 0.05;
+    const t = now / 1000;
+
+    // timer
+    timerAcc += dt;
+    if (timerAcc >= 1) {
+      const dec = Math.floor(timerAcc);
+      timerAcc -= dec;
+      timeLeft -= dec;
+      if (timeLeft <= 0) { timeLeft = 0; timeEl.textContent = 0; endGame(); return; }
+      timeEl.textContent = timeLeft;
+    }
+
+    // spawn
+    spawnCD -= dt;
+    const targetCount = Math.min(12, 6 + Math.floor((60 - timeLeft) / 8));
+    if (spawnCD <= 0 && orbs.filter(o => !o.caught).length < targetCount) {
+      spawnOrb();
+      spawnCD = rand(0.35, 0.9);
+    }
+
+    // shake
+    let sx = 0, sy = 0;
+    if (shake > 0) {
+      sx = (Math.random() - 0.5) * shake;
+      sy = (Math.random() - 0.5) * shake;
+      shake = Math.max(0, shake - dt * 60);
+    }
+
+    // update orbs
+    for (const o of orbs) {
+      if (o.caught) continue;
+      o.x += o.vx;
+      o.y += o.vy;
+      o.life += dt;
+      o.bornFlash = Math.max(0, o.bornFlash - dt * 1.6);
+      // gentle wobble
+      o.vx += Math.sin(t * 0.7 + o.phase) * 0.01;
+      o.vy += Math.cos(t * 0.6 + o.phase) * 0.01;
+      // bounce inside soft walls when fully inside
+      if (o.x < o.r && o.vx < 0) o.vx *= -1;
+      if (o.x > W - o.r && o.vx > 0) o.vx *= -1;
+      if (o.y < o.r + 60 && o.vy < 0) o.vy *= -1;
+      if (o.y > H - o.r && o.vy > 0) o.vy *= -1;
+      // clamp speed
+      const sp = Math.hypot(o.vx, o.vy);
+      const maxSp = 1.4;
+      if (sp > maxSp) { o.vx *= maxSp / sp; o.vy *= maxSp / sp; }
+      // expire
+      if (o.life > o.maxLife) {
+        o.caught = true; // remove silently
+      }
+    }
+    orbs = orbs.filter(o => !o.caught || false);
+    // remove caught orbs that finished animation - simpler: just drop caught orbs after spawning particles
+    orbs = orbs.filter(o => !o.caught);
+
+    // update particles
+    for (const p of particles) {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vx *= 0.96; p.vy *= 0.96;
+      p.life -= dt;
+    }
+    particles = particles.filter(p => p.life > 0);
+
+    // update trails
+    for (const tr of trails) tr.life -= dt;
+    trails = trails.filter(tr => tr.life > 0);
+
+    if (comboFlashT > 0) comboFlashT -= dt;
+
+    // ---- DRAW ----
+    ctx.save();
+    ctx.translate(sx, sy);
+
+    drawBackground(t);
+
+    // trails (closed)
+    for (const tr of trails) {
+      const a = tr.life / tr.max;
+      const col = tr.bad ? `rgba(255,79,122,${0.55*a})`
+                : tr.good ? `rgba(255,255,255,${0.65*a})`
+                : `rgba(200,200,255,${0.3*a})`;
+      drawPath(tr.pts, { closed: true, color: col, width: 3, glow: 18*a });
+      // filled overlay
+      ctx.beginPath();
+      ctx.moveTo(tr.pts[0].x, tr.pts[0].y);
+      for (let i = 1; i < tr.pts.length; i++) ctx.lineTo(tr.pts[i].x, tr.pts[i].y);
+      ctx.closePath();
+      ctx.fillStyle = tr.bad ? `rgba(255,79,122,${0.12*a})`
+                    : tr.good ? `rgba(255,255,255,${0.10*a})`
+                    : `rgba(200,200,255,${0.06*a})`;
+      ctx.fill();
+    }
+
+    // orbs
+    for (const o of orbs) drawOrb(o, t);
+
+    // particles
+    for (const p of particles) {
+      const a = Math.max(0, p.life / p.max);
+      ctx.globalAlpha = a;
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.size * a, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // current path
+    if (drawing && path.length > 1) {
+      // glow
+      drawPath(path, { closed: false, color: 'rgba(255,255,255,0.85)', width: 3.5, glow: 16 });
+      // start marker
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(path[0].x, path[0].y, 5, 0, Math.PI*2); ctx.fill();
+      // dotted closing hint between last and first
+      const a = path[0], b = path[path.length - 1];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (d > 4) {
+        ctx.setLineDash([4, 6]);
+        ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(b.x, b.y);
+        ctx.lineTo(a.x, a.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
+    // combo flash
+    if (comboFlashT > 0) {
+      const a = Math.min(1, comboFlashT / 0.5);
+      ctx.globalAlpha = a;
+      ctx.fillStyle = '#fff';
+      ctx.font = '700 26px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.shadowBlur = 18;
+      ctx.shadowColor = targetColor.glow;
+      ctx.fillText(comboFlashText, W/2, H/2 + 6);
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
+    }
+
+    ctx.restore();
+
+    requestAnimationFrame(loop);
+  }
+
+  // initial idle background so it doesn't look black behind overlay
+  function idleDraw() {
+    drawBackground(performance.now() / 1000);
+    if (!running) requestAnimationFrame(idleDraw);
+  }
+  idleDraw();
+})();
+</script>
+</body>
+</html>
