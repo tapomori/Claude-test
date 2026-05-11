@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#05060e">
+<title>Lodestone</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+  html,body{width:100%;height:100%;overflow:hidden;background:#05060e;color:#e5e9ff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;touch-action:manipulation;overscroll-behavior:none}
+  #stage{position:fixed;inset:0;display:flex;justify-content:center;align-items:center;background:radial-gradient(ellipse at 50% 30%,#15183a 0%,#070815 60%,#03040a 100%)}
+  canvas{display:block;width:100%;height:100%;touch-action:none}
+  #hud{position:fixed;top:0;left:0;right:0;padding:14px 18px;display:flex;justify-content:space-between;align-items:flex-start;pointer-events:none;font-weight:600;letter-spacing:.06em;text-shadow:0 0 8px rgba(120,200,255,.4)}
+  #score{font-size:30px;color:#dff3ff}
+  #score .lbl{font-size:11px;letter-spacing:.2em;opacity:.55;display:block;font-weight:500}
+  #right{text-align:right}
+  #timer{font-size:24px;color:#bfe6ff}
+  #lives{margin-top:6px;font-size:18px;letter-spacing:.18em}
+  #back{position:fixed;left:14px;bottom:14px;padding:8px 14px;border:1px solid rgba(255,255,255,.22);border-radius:999px;color:#a8b6ff;text-decoration:none;font-size:13px;background:rgba(10,12,30,.45);backdrop-filter:blur(8px);pointer-events:auto;z-index:20}
+  #overlay{position:fixed;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:30px;background:rgba(5,6,14,.78);backdrop-filter:blur(14px);z-index:30;text-align:center;transition:opacity .3s}
+  #overlay.hidden{opacity:0;pointer-events:none}
+  #overlay h1{font-size:46px;font-weight:800;letter-spacing:.04em;background:linear-gradient(135deg,#7be7ff,#a888ff,#ff7ad5);-webkit-background-clip:text;background-clip:text;color:transparent;margin-bottom:6px}
+  #overlay .sub{font-size:13px;opacity:.65;letter-spacing:.2em;margin-bottom:28px}
+  #overlay p{font-size:14px;line-height:1.7;color:#cfd6ff;max-width:300px;margin-bottom:6px}
+  #overlay p .ic{display:inline-block;width:12px;height:12px;border-radius:50%;vertical-align:middle;margin:0 4px;box-shadow:0 0 8px currentColor}
+  #overlay .iron{background:#cfdcf5;color:#9fb8e2}
+  #overlay .gold{background:#ffd66b;color:#ffb14a}
+  #overlay .danger{background:#ff4d6d;color:#ff4d6d}
+  #btn{margin-top:30px;padding:14px 38px;border-radius:999px;border:none;background:linear-gradient(135deg,#5fa8ff,#a87bff);color:#fff;font-size:16px;font-weight:700;letter-spacing:.2em;box-shadow:0 8px 30px rgba(120,140,255,.4);cursor:pointer}
+  #btn:active{transform:scale(.96)}
+  #final{font-size:60px;margin:12px 0 4px;color:#fff;font-weight:800;text-shadow:0 0 22px rgba(180,200,255,.5)}
+  .hint{position:fixed;left:0;right:0;bottom:90px;text-align:center;font-size:12px;letter-spacing:.18em;opacity:.4;pointer-events:none;color:#aac6ff}
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="cv"></canvas>
+</div>
+<div id="hud">
+  <div id="score"><span class="lbl">SCORE</span><span id="scoreVal">0</span></div>
+  <div id="right">
+    <div id="timer">60</div>
+    <div id="lives">◆ ◆ ◆</div>
+  </div>
+</div>
+<div class="hint">HOLD TO PULL</div>
+<a id="back" href="../../index.html">← gallery</a>
+
+<div id="overlay">
+  <h1>LODESTONE</h1>
+  <div class="sub">— MAGNETIC DRIFT —</div>
+  <p>画面を<b>長押し</b>して磁場を発生。</p>
+  <p><span class="ic iron"></span> 銀の鉄片 <b>+1</b></p>
+  <p><span class="ic gold"></span> 金のかけら <b>+5</b></p>
+  <p><span class="ic danger"></span> 赤い不安定 <b>触れるとダメージ</b></p>
+  <p style="margin-top:14px;opacity:.6">60秒でスコアを稼げ。指を離せば磁場は消える。</p>
+  <button id="btn">START</button>
+</div>
+
+<script>
+(() => {
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const overlay = document.getElementById('overlay');
+const btn = document.getElementById('btn');
+const scoreEl = document.getElementById('scoreVal');
+const timerEl = document.getElementById('timer');
+const livesEl = document.getElementById('lives');
+const finalEl = document.getElementById('final');
+const hint = document.querySelector('.hint');
+
+let W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2);
+function resize(){
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = W * DPR; cv.height = H * DPR;
+  cv.style.width = W + 'px'; cv.style.height = H + 'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+const rand = (a,b) => a + Math.random() * (b-a);
+const TAU = Math.PI*2;
+
+let particles = [];
+let pulses = [];
+let bursts = [];
+let stars = [];
+
+// Background stars
+for(let i=0;i<60;i++){
+  stars.push({x: Math.random()*W, y: Math.random()*H, r: Math.random()*1.2+.2, t: Math.random()*TAU, s: Math.random()*.6+.2});
+}
+
+let finger = null; // {x,y,strength}
+let state = 'idle'; // idle | playing | over
+let score = 0, lives = 3, timeLeft = 60;
+let last = 0, startTime = 0;
+let shake = 0;
+let hue = 0;
+
+function spawnParticle(type, x, y){
+  const p = {
+    type, // 'iron' | 'gold' | 'danger'
+    x: x ?? rand(20, W-20),
+    y: y ?? rand(20, H-20),
+    vx: rand(-.4,.4),
+    vy: rand(-.4,.4),
+    r: type === 'gold' ? 7 : type === 'danger' ? 8 : 4.5,
+    life: 0,
+    spin: Math.random()*TAU,
+    pulse: Math.random()*TAU,
+    trail: []
+  };
+  particles.push(p);
+}
+
+function initParticles(){
+  particles = [];
+  for(let i=0;i<22;i++) spawnParticle('iron');
+  for(let i=0;i<4;i++) spawnParticle('gold');
+  for(let i=0;i<5;i++) spawnParticle('danger');
+}
+
+function start(){
+  state = 'playing';
+  score = 0; lives = 3; timeLeft = 60;
+  particles = []; pulses = []; bursts = [];
+  initParticles();
+  overlay.classList.add('hidden');
+  hint.style.opacity = .4;
+  scoreEl.textContent = 0;
+  livesEl.textContent = '◆ ◆ ◆';
+  timerEl.textContent = 60;
+  startTime = performance.now();
+  last = startTime;
+}
+
+function gameOver(){
+  state = 'over';
+  finger = null;
+  overlay.classList.remove('hidden');
+  overlay.querySelector('h1').textContent = 'TIME UP';
+  overlay.querySelector('.sub').textContent = `— SCORE ${score} —`;
+  // Replace inner content briefly
+  const ps = overlay.querySelectorAll('p');
+  ps.forEach(p => p.style.display = 'none');
+  btn.textContent = 'AGAIN';
+  btn.onclick = () => {
+    ps.forEach(p => p.style.display = '');
+    overlay.querySelector('h1').textContent = 'LODESTONE';
+    overlay.querySelector('.sub').textContent = '— MAGNETIC DRIFT —';
+    btn.textContent = 'START';
+    btn.onclick = start;
+    start();
+  };
+}
+
+btn.onclick = start;
+
+// Input
+function handleDown(x, y){
+  if(state !== 'playing') return;
+  finger = {x, y, strength: 0, t: 0};
+  hint.style.opacity = 0;
+}
+function handleMove(x, y){
+  if(finger){ finger.x = x; finger.y = y; }
+}
+function handleUp(){
+  if(finger){
+    // small release pulse
+    pulses.push({x: finger.x, y: finger.y, r: 30, max: 90, life: 0, color: 'rgba(140,200,255,.5)'});
+  }
+  finger = null;
+}
+
+cv.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const t = e.touches[0];
+  const rect = cv.getBoundingClientRect();
+  handleDown(t.clientX - rect.left, t.clientY - rect.top);
+}, {passive:false});
+cv.addEventListener('touchmove', e => {
+  e.preventDefault();
+  const t = e.touches[0];
+  const rect = cv.getBoundingClientRect();
+  handleMove(t.clientX - rect.left, t.clientY - rect.top);
+}, {passive:false});
+cv.addEventListener('touchend', e => { e.preventDefault(); handleUp(); }, {passive:false});
+cv.addEventListener('touchcancel', e => { e.preventDefault(); handleUp(); }, {passive:false});
+
+cv.addEventListener('mousedown', e => { handleDown(e.offsetX, e.offsetY); });
+cv.addEventListener('mousemove', e => { if(e.buttons) handleMove(e.offsetX, e.offsetY); });
+cv.addEventListener('mouseup', handleUp);
+cv.addEventListener('mouseleave', handleUp);
+
+function vibrate(ms){
+  if(navigator.vibrate) navigator.vibrate(ms);
+}
+
+function collect(p){
+  if(p.type === 'iron'){
+    score += 1;
+    bursts.push({x: p.x, y: p.y, color: '#cfdcf5', big: false});
+    vibrate(8);
+  } else if(p.type === 'gold'){
+    score += 5;
+    bursts.push({x: p.x, y: p.y, color: '#ffd66b', big: true});
+    vibrate(20);
+  } else if(p.type === 'danger'){
+    lives -= 1;
+    shake = 18;
+    bursts.push({x: p.x, y: p.y, color: '#ff4d6d', big: true, danger: true});
+    vibrate([30,30,40]);
+    livesEl.textContent = '◆ '.repeat(Math.max(0,lives)).trim() || '—';
+    if(lives <= 0){
+      gameOver();
+    }
+  }
+  scoreEl.textContent = score;
+}
+
+function tick(now){
+  const dt = Math.min(50, now - last);
+  last = now;
+
+  if(state === 'playing'){
+    timeLeft = Math.max(0, 60 - (now - startTime)/1000);
+    timerEl.textContent = Math.ceil(timeLeft);
+    if(timeLeft <= 0) gameOver();
+  }
+
+  // Camera shake offset
+  let sx = 0, sy = 0;
+  if(shake > 0){
+    sx = (Math.random()-.5)*shake;
+    sy = (Math.random()-.5)*shake;
+    shake *= 0.85;
+    if(shake < .3) shake = 0;
+  }
+
+  // Clear with trailing
+  ctx.fillStyle = 'rgba(5,6,14,0.28)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.save();
+  ctx.translate(sx, sy);
+
+  // Background stars
+  for(const s of stars){
+    s.t += 0.02 * s.s;
+    const a = 0.3 + Math.sin(s.t) * 0.3;
+    ctx.fillStyle = `rgba(180,200,255,${a})`;
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, TAU); ctx.fill();
+  }
+
+  // Update finger strength (ramps up)
+  if(finger){
+    finger.t += dt;
+    finger.strength = Math.min(1, finger.t / 250);
+  }
+
+  // Update particles
+  const drag = 0.992;
+  for(let i = particles.length - 1; i >= 0; i--){
+    const p = particles[i];
+    p.spin += 0.04;
+    p.pulse += 0.06;
+
+    // Magnetic attraction
+    if(finger){
+      const dx = finger.x - p.x;
+      const dy = finger.y - p.y;
+      const dist2 = dx*dx + dy*dy;
+      const dist = Math.sqrt(dist2);
+      const maxR = 260;
+      if(dist < maxR){
+        const force = (1 - dist / maxR) * finger.strength * 0.55;
+        p.vx += (dx / (dist + 1)) * force;
+        p.vy += (dy / (dist + 1)) * force;
+      }
+      // Collection
+      if(dist < p.r + 14){
+        collect(p);
+        particles.splice(i, 1);
+        // respawn after delay; queue
+        setTimeout(() => {
+          if(state === 'playing') spawnParticle(p.type);
+        }, p.type === 'gold' ? 2500 : p.type === 'danger' ? 1500 : 500);
+        continue;
+      }
+    }
+
+    // Position update
+    p.vx *= drag; p.vy *= drag;
+    // Clamp speed
+    const sp = Math.hypot(p.vx, p.vy);
+    if(sp > 9){ p.vx = p.vx/sp*9; p.vy = p.vy/sp*9; }
+    p.x += p.vx * dt/16;
+    p.y += p.vy * dt/16;
+
+    // Wrap edges
+    if(p.x < -20) p.x = W+20;
+    if(p.x > W+20) p.x = -20;
+    if(p.y < -20) p.y = H+20;
+    if(p.y > H+20) p.y = -20;
+
+    // Trail
+    p.trail.push({x: p.x, y: p.y});
+    if(p.trail.length > (p.type === 'danger' ? 10 : 8)) p.trail.shift();
+
+    // Draw trail
+    if(p.trail.length > 1){
+      ctx.lineWidth = p.r * 0.8;
+      ctx.lineCap = 'round';
+      const c = p.type === 'iron' ? '#a8b8d8'
+              : p.type === 'gold' ? '#ffce4a'
+              : '#ff4d6d';
+      for(let j = 1; j < p.trail.length; j++){
+        const a = (j / p.trail.length) * 0.35;
+        ctx.strokeStyle = `rgba(${p.type==='iron'?'168,184,216':p.type==='gold'?'255,206,74':'255,77,109'},${a})`;
+        ctx.beginPath();
+        ctx.moveTo(p.trail[j-1].x, p.trail[j-1].y);
+        ctx.lineTo(p.trail[j].x, p.trail[j].y);
+        ctx.stroke();
+      }
+    }
+
+    // Draw particle
+    if(p.type === 'iron'){
+      ctx.fillStyle = '#dde6f8';
+      ctx.shadowColor = '#9fb8ff'; ctx.shadowBlur = 8;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, TAU); ctx.fill();
+      ctx.shadowBlur = 0;
+    } else if(p.type === 'gold'){
+      // golden sparkle star
+      const glow = 0.7 + Math.sin(p.pulse)*0.3;
+      ctx.shadowColor = '#ffce4a'; ctx.shadowBlur = 20 * glow;
+      ctx.fillStyle = '#ffd870';
+      ctx.beginPath();
+      for(let k=0;k<8;k++){
+        const a = p.spin + k * Math.PI/4;
+        const rr = k%2===0 ? p.r*1.4 : p.r*0.6;
+        const x = p.x + Math.cos(a)*rr;
+        const y = p.y + Math.sin(a)*rr;
+        if(k===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    } else {
+      // danger - red spiky orb
+      const glow = 0.7 + Math.sin(p.pulse*2)*0.3;
+      ctx.shadowColor = '#ff2d4d'; ctx.shadowBlur = 16 * glow;
+      ctx.fillStyle = '#ff3a5e';
+      ctx.beginPath();
+      for(let k=0;k<10;k++){
+        const a = p.spin + k * Math.PI/5;
+        const rr = k%2===0 ? p.r*1.3 : p.r*0.7;
+        const x = p.x + Math.cos(a)*rr;
+        const y = p.y + Math.sin(a)*rr;
+        if(k===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      }
+      ctx.closePath();
+      ctx.fill();
+      // inner core
+      ctx.fillStyle = '#fff0a0';
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r*0.4, 0, TAU); ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  // Draw magnetic field
+  if(finger){
+    hue = (hue + 1) % 360;
+    const s = finger.strength;
+    // outer field rings
+    for(let r = 40; r < 260; r += 26){
+      const a = (1 - r/260) * 0.18 * s;
+      ctx.strokeStyle = `rgba(140,200,255,${a})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(finger.x, finger.y, r + (now/30)%26, 0, TAU); ctx.stroke();
+    }
+    // field lines
+    ctx.strokeStyle = `rgba(180,220,255,${0.25*s})`;
+    ctx.lineWidth = 1;
+    for(let k=0;k<12;k++){
+      const a = k * TAU/12 + (now/600);
+      ctx.beginPath();
+      ctx.moveTo(finger.x + Math.cos(a)*20, finger.y + Math.sin(a)*20);
+      ctx.lineTo(finger.x + Math.cos(a)*(50 + s*40), finger.y + Math.sin(a)*(50 + s*40));
+      ctx.stroke();
+    }
+    // core
+    const coreR = 16 + s * 10;
+    const grad = ctx.createRadialGradient(finger.x, finger.y, 0, finger.x, finger.y, coreR*2);
+    grad.addColorStop(0, `rgba(180,230,255,${0.9*s})`);
+    grad.addColorStop(0.5, `rgba(120,160,255,${0.4*s})`);
+    grad.addColorStop(1, 'rgba(80,100,200,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(finger.x, finger.y, coreR*2, 0, TAU); ctx.fill();
+
+    ctx.fillStyle = `rgba(255,255,255,${0.95*s})`;
+    ctx.beginPath(); ctx.arc(finger.x, finger.y, 6 + s*3, 0, TAU); ctx.fill();
+  }
+
+  // Pulses
+  for(let i = pulses.length - 1; i >= 0; i--){
+    const p = pulses[i];
+    p.life += dt;
+    const t = p.life / 400;
+    if(t >= 1){ pulses.splice(i,1); continue; }
+    const r = p.r + (p.max - p.r) * t;
+    ctx.strokeStyle = p.color.replace(/[\d.]+\)/, (1-t)*0.5 + ')');
+    ctx.lineWidth = 2 * (1-t);
+    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, TAU); ctx.stroke();
+  }
+
+  // Bursts
+  for(let i = bursts.length - 1; i >= 0; i--){
+    const b = bursts[i];
+    if(!b.parts){
+      b.parts = [];
+      const n = b.big ? 16 : 8;
+      for(let k=0;k<n;k++){
+        const a = Math.random() * TAU;
+        const sp = rand(1, b.big ? 5 : 3);
+        b.parts.push({x: b.x, y: b.y, vx: Math.cos(a)*sp, vy: Math.sin(a)*sp, life: 0, max: rand(300, 600)});
+      }
+    }
+    b.life = (b.life || 0) + dt;
+    let alive = false;
+    for(const pp of b.parts){
+      pp.life += dt;
+      if(pp.life < pp.max){
+        alive = true;
+        pp.x += pp.vx; pp.y += pp.vy;
+        pp.vx *= 0.94; pp.vy *= 0.94;
+        const a = 1 - pp.life/pp.max;
+        ctx.fillStyle = b.color;
+        ctx.globalAlpha = a;
+        ctx.beginPath(); ctx.arc(pp.x, pp.y, b.big ? 3 : 2, 0, TAU); ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    }
+    if(!alive) bursts.splice(i,1);
+  }
+
+  ctx.restore();
+
+  // Vignette
+  const vg = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.4, W/2, H/2, Math.max(W,H)*0.7);
+  vg.addColorStop(0, 'rgba(0,0,0,0)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.55)');
+  ctx.fillStyle = vg;
+  ctx.fillRect(0,0,W,H);
+
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+
+// Prevent context menu / pinch zoom on iOS
+document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('contextmenu', e => e.preventDefault());
+})();
+</script>
+</body>
+</html>
