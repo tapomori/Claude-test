@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>Mirror Tap</title>
+<style>
+  :root {
+    --bg: #07070d;
+    --top-color: #6ee0ff;
+    --bot-color: #ff7ad9;
+    --warn: #ffd96b;
+    --bad: #ff4d6d;
+    --good: #5cffb1;
+    --text: #f4f4ff;
+    --dim: rgba(255,255,255,0.45);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; width: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif;
+    overflow: hidden;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    overscroll-behavior: none;
+  }
+  #stage {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column;
+  }
+  .pane {
+    flex: 1 1 50%;
+    position: relative;
+    overflow: hidden;
+    transition: background 120ms ease;
+  }
+  .pane.top {
+    background: radial-gradient(ellipse at 50% 80%, rgba(110,224,255,0.08), transparent 60%);
+    border-bottom: 1px dashed rgba(255,255,255,0.06);
+  }
+  .pane.bot {
+    background: radial-gradient(ellipse at 50% 20%, rgba(255,122,217,0.08), transparent 60%);
+  }
+  .label {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    color: var(--dim);
+    text-transform: uppercase;
+    pointer-events: none;
+  }
+  .top .label { top: 10px; }
+  .bot .label { bottom: 10px; }
+  .center-line {
+    position: absolute; left: 0; right: 0; top: 50%;
+    height: 1px; background: rgba(255,255,255,0.06);
+    pointer-events: none;
+  }
+  .hud {
+    position: absolute; top: 50%;
+    left: 50%; transform: translate(-50%, -50%);
+    display: flex; gap: 10px;
+    pointer-events: none;
+    z-index: 10;
+  }
+  .hud .pill {
+    background: rgba(0,0,0,0.55);
+    border: 1px solid rgba(255,255,255,0.12);
+    padding: 5px 11px;
+    border-radius: 999px;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+  .hud .pill b { color: var(--good); font-weight: 700; }
+  .hud .pill.lives b { color: var(--bad); }
+
+  /* target circle */
+  .target {
+    position: absolute;
+    width: 42vw; height: 42vw;
+    max-width: 240px; max-height: 240px;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%) scale(0.4);
+    border-radius: 50%;
+    border: 3px solid currentColor;
+    color: var(--top-color);
+    opacity: 0;
+    transition: transform 200ms cubic-bezier(.2,1.4,.4,1), opacity 140ms ease;
+    box-shadow: 0 0 40px currentColor, inset 0 0 30px currentColor;
+    pointer-events: none;
+  }
+  .target.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  .target.show.tapped { opacity: 0.55; transform: translate(-50%, -50%) scale(0.85); }
+  .target.solo { /* solo decoy: marked with diagonal */
+    border-style: dashed;
+  }
+  .target.pop { transform: translate(-50%, -50%) scale(1.4); opacity: 0; }
+  .bot .target { color: var(--bot-color); }
+
+  .target .core {
+    position: absolute;
+    inset: 22%;
+    border-radius: 50%;
+    background: radial-gradient(circle, currentColor 0%, transparent 70%);
+    opacity: 0.55;
+  }
+
+  /* Active glow when target shown */
+  .pane.armed.top { background: radial-gradient(ellipse at 50% 80%, rgba(110,224,255,0.16), transparent 65%); }
+  .pane.armed.bot { background: radial-gradient(ellipse at 50% 20%, rgba(255,122,217,0.16), transparent 65%); }
+  .pane.paired.top { background: radial-gradient(ellipse at 50% 80%, rgba(92,255,177,0.20), transparent 65%); }
+  .pane.paired.bot { background: radial-gradient(ellipse at 50% 20%, rgba(92,255,177,0.20), transparent 65%); }
+
+  /* ripple */
+  .ripple {
+    position: absolute;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    animation: rippleA 480ms ease-out forwards;
+    width: 0; height: 0;
+  }
+  @keyframes rippleA {
+    0%   { width: 0; height: 0; opacity: 0.9; }
+    100% { width: 70vw; height: 70vw; opacity: 0; }
+  }
+
+  /* burst particles */
+  .spark {
+    position: absolute;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    animation: sparkA 620ms ease-out forwards;
+  }
+  @keyframes sparkA {
+    to { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(0.2); opacity: 0; }
+  }
+
+  /* flash overlay */
+  #flash {
+    position: fixed; inset: 0;
+    background: var(--good);
+    opacity: 0; pointer-events: none;
+    transition: opacity 120ms ease;
+    z-index: 5;
+    mix-blend-mode: screen;
+  }
+  #flash.bad { background: var(--bad); }
+
+  /* score popup */
+  .popup {
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 26px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    color: var(--good);
+    pointer-events: none;
+    text-shadow: 0 0 14px currentColor;
+    animation: popA 700ms ease-out forwards;
+  }
+  .popup.bad { color: var(--bad); }
+  .popup.warn { color: var(--warn); }
+  @keyframes popA {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
+    20% { opacity: 1; transform: translate(-50%, -80%) scale(1.0); }
+    100% { opacity: 0; transform: translate(-50%, -150%) scale(1.0); }
+  }
+
+  /* combo banner */
+  #combo {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 13px;
+    color: var(--warn);
+    background: rgba(0,0,0,0.55);
+    padding: 4px 10px;
+    border-radius: 999px;
+    letter-spacing: 0.12em;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 11;
+    transition: opacity 200ms ease;
+    margin-top: -38px;
+  }
+  #combo.show { opacity: 1; }
+
+  /* title / gameover */
+  #overlay {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: rgba(7,7,13,0.88);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    z-index: 20;
+    text-align: center;
+    padding: 24px;
+  }
+  #overlay h1 {
+    font-size: 42px;
+    margin: 0 0 4px;
+    letter-spacing: 0.18em;
+    background: linear-gradient(90deg, var(--top-color), var(--bot-color));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  #overlay p {
+    color: var(--dim);
+    font-size: 13px;
+    line-height: 1.6em;
+    max-width: 300px;
+    margin: 4px 0;
+  }
+  #overlay .stat {
+    color: var(--text);
+    font-size: 16px;
+    margin-top: 10px;
+  }
+  #overlay button {
+    margin-top: 22px;
+    background: linear-gradient(90deg, var(--top-color), var(--bot-color));
+    color: #07070d;
+    border: 0;
+    padding: 14px 36px;
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: 0.18em;
+    border-radius: 999px;
+    cursor: pointer;
+    box-shadow: 0 8px 24px rgba(110,224,255,0.25);
+  }
+  #overlay button:active { transform: scale(0.97); }
+  .hint-row {
+    display: flex;
+    gap: 18px;
+    margin-top: 14px;
+    color: var(--dim);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+  }
+  .hint-row span b { color: var(--text); font-weight: 600; }
+  .legend {
+    margin-top: 16px;
+    display: flex;
+    gap: 24px;
+    font-size: 11px;
+    color: var(--dim);
+    letter-spacing: 0.1em;
+  }
+  .legend i {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    vertical-align: middle;
+    margin-right: 6px;
+    box-shadow: 0 0 10px currentColor;
+  }
+  .legend .solid i { border: 2px solid currentColor; }
+  .legend .dash i { border: 2px dashed currentColor; }
+
+  .back {
+    position: fixed;
+    top: 10px; left: 12px;
+    z-index: 30;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    color: var(--dim);
+    text-decoration: none;
+    padding: 6px 10px;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 999px;
+    background: rgba(0,0,0,0.4);
+  }
+  .back:active { color: var(--text); }
+</style>
+</head>
+<body>
+  <a href="../../index.html" class="back">← GALLERY</a>
+
+  <div id="stage">
+    <div class="pane top" id="paneTop">
+      <span class="label">TOP</span>
+      <div class="target" id="targetTop"><div class="core"></div></div>
+    </div>
+    <div class="pane bot" id="paneBot">
+      <span class="label">BOT</span>
+      <div class="target" id="targetBot"><div class="core"></div></div>
+    </div>
+    <div class="center-line"></div>
+    <div class="hud">
+      <div class="pill score">SCORE <b id="score">0</b></div>
+      <div class="pill lives">LIFE <b id="lives">♥♥♥</b></div>
+    </div>
+    <div id="combo"></div>
+  </div>
+
+  <div id="flash"></div>
+
+  <div id="overlay">
+    <h1>MIRROR TAP</h1>
+    <p>上下が<b style="color:var(--good)">同時に光ったら</b>、両方の親指で同時タップ。</p>
+    <p>片方だけが<b style="color:var(--warn)">点線</b>で光るのはダミー。タップすると<b style="color:var(--bad)">ミス</b>。</p>
+    <div class="legend">
+      <span class="solid" style="color:var(--good)"><i></i>同時 → タップ</span>
+      <span class="dash" style="color:var(--warn)"><i></i>単独 → 触らない</span>
+    </div>
+    <div class="stat" id="finalStat" style="display:none"></div>
+    <button id="startBtn">START</button>
+  </div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const paneTop = $('paneTop');
+  const paneBot = $('paneBot');
+  const targetTop = $('targetTop');
+  const targetBot = $('targetBot');
+  const scoreEl = $('score');
+  const livesEl = $('lives');
+  const overlay = $('overlay');
+  const startBtn = $('startBtn');
+  const finalStat = $('finalStat');
+  const flash = $('flash');
+  const comboEl = $('combo');
+
+  const PAIR_WINDOW = 360; // ms allowed between two-thumb taps
+
+  const S = {
+    running: false,
+    score: 0,
+    lives: 3,
+    combo: 0,
+    best: parseInt(localStorage.getItem('mirrortap_best') || '0', 10),
+    elapsed: 0,
+    startedAt: 0,
+    // one active challenge at a time:
+    // { kind: 'pair'|'solo', sides: {top:bool, bot:bool}, tapped: {top:bool, bot:bool},
+    //   spawnedAt, expireAt, life, settled:false }
+    active: null,
+    graceUntil: 0,
+    spawnTimer: null,
+  };
+
+  function vibrate(ms){ if (navigator.vibrate) try { navigator.vibrate(ms); } catch(e){} }
+
+  function setLives() {
+    livesEl.textContent = ['','♥','♥♥','♥♥♥'][Math.max(0,S.lives)] || '';
+    livesEl.parentElement.style.color = S.lives <= 1 ? 'var(--bad)' : '';
+  }
+  function setScore() { scoreEl.textContent = S.score; }
+
+  function setFlash(bad, strong) {
+    flash.classList.toggle('bad', !!bad);
+    flash.style.opacity = strong ? '0.6' : '0.4';
+    setTimeout(() => { flash.style.opacity = '0'; }, 110);
+  }
+
+  function spawnRipple(pane, x, y, color) {
+    const r = document.createElement('div');
+    r.className = 'ripple';
+    r.style.left = x + 'px';
+    r.style.top = y + 'px';
+    r.style.color = color;
+    pane.appendChild(r);
+    setTimeout(() => r.remove(), 520);
+  }
+  function spawnSparks(pane, x, y, color) {
+    for (let i = 0; i < 12; i++) {
+      const s = document.createElement('div');
+      s.className = 'spark';
+      const a = (Math.PI * 2 * i) / 12 + Math.random() * 0.35;
+      const d = 60 + Math.random() * 70;
+      s.style.left = x + 'px';
+      s.style.top = y + 'px';
+      s.style.color = color;
+      s.style.setProperty('--dx', Math.cos(a) * d + 'px');
+      s.style.setProperty('--dy', Math.sin(a) * d + 'px');
+      pane.appendChild(s);
+      setTimeout(() => s.remove(), 640);
+    }
+  }
+  function popupAt(pane, text, cls) {
+    const p = document.createElement('div');
+    p.className = 'popup' + (cls ? ' ' + cls : '');
+    p.textContent = text;
+    pane.appendChild(p);
+    setTimeout(() => p.remove(), 720);
+  }
+  function showCombo() {
+    if (S.combo >= 2) {
+      comboEl.textContent = 'COMBO × ' + S.combo;
+      comboEl.classList.add('show');
+      clearTimeout(showCombo._t);
+      showCombo._t = setTimeout(() => comboEl.classList.remove('show'), 900);
+    }
+  }
+
+  function paneOf(side){ return side === 'top' ? paneTop : paneBot; }
+  function elOf(side){ return side === 'top' ? targetTop : targetBot; }
+
+  function difficulty() {
+    const t = S.elapsed / 1000;
+    const life = Math.max(720, 1500 - t * 22);
+    const gap = Math.max(550, 1250 - t * 24);
+    const soloChance = Math.min(0.55, 0.18 + t * 0.012);
+    return { life, gap, soloChance };
+  }
+
+  function showTarget(side, isSolo) {
+    const el = elOf(side);
+    el.classList.remove('pop','tapped','solo');
+    if (isSolo) el.classList.add('solo');
+    // force reflow so transition runs
+    void el.offsetWidth;
+    el.classList.add('show');
+    paneOf(side).classList.add('armed');
+  }
+
+  function hideTarget(side, withPop) {
+    const el = elOf(side);
+    el.classList.toggle('pop', !!withPop);
+    el.classList.remove('show','tapped');
+    paneOf(side).classList.remove('armed','paired');
+  }
+
+  function spawnNext() {
+    if (!S.running) return;
+    if (S.active) return; // wait until current is settled
+    const { life, soloChance } = difficulty();
+    const isSolo = Math.random() < soloChance;
+    const now = performance.now();
+    if (isSolo) {
+      const side = Math.random() < 0.5 ? 'top' : 'bot';
+      S.active = {
+        kind: 'solo',
+        sides: { top: side === 'top', bot: side === 'bot' },
+        tapped: { top: false, bot: false },
+        spawnedAt: now,
+        expireAt: now + life,
+        life,
+        settled: false,
+      };
+      showTarget(side, true);
+    } else {
+      S.active = {
+        kind: 'pair',
+        sides: { top: true, bot: true },
+        tapped: { top: false, bot: false },
+        spawnedAt: now,
+        expireAt: now + life,
+        life,
+        settled: false,
+      };
+      showTarget('top', false);
+      showTarget('bot', false);
+      paneTop.classList.add('paired');
+      paneBot.classList.add('paired');
+    }
+  }
+
+  function scheduleSpawn() {
+    if (!S.running) return;
+    clearTimeout(S.spawnTimer);
+    const { gap } = difficulty();
+    const wait = gap * (0.75 + Math.random() * 0.45);
+    S.spawnTimer = setTimeout(() => {
+      if (!S.running) return;
+      spawnNext();
+      scheduleSpawn();
+    }, wait);
+  }
+
+  function settle(active, hit) {
+    if (!active || active.settled) return;
+    active.settled = true;
+    // clean up visuals
+    if (active.sides.top) hideTarget('top', hit);
+    if (active.sides.bot) hideTarget('bot', hit);
+    if (S.active === active) S.active = null;
+    // short grace prevents double-penalty from late taps
+    S.graceUntil = performance.now() + (hit ? 80 : 280);
+  }
+
+  function loseLife() {
+    S.combo = 0;
+    S.lives -= 1;
+    setLives();
+    setFlash(true, true);
+    vibrate(45);
+    if (S.lives <= 0) gameOver();
+  }
+
+  function awardPair(active) {
+    const now = performance.now();
+    const tightness = Math.max(0, (active.expireAt - now) / active.life);
+    let bonus = 1;
+    let label = 'PAIR';
+    if (tightness > 0.7) { bonus = 3; label = 'PERFECT'; }
+    else if (tightness > 0.4) { bonus = 2; label = 'GOOD'; }
+    const points = bonus + Math.floor(S.combo / 3);
+    S.score += points;
+    setScore();
+    S.combo += 1;
+    showCombo();
+    // visuals at target centers
+    burstFromTarget('top', '#5cffb1');
+    burstFromTarget('bot', '#5cffb1');
+    popupAt(paneTop, label, '');
+    setFlash(false, bonus === 3);
+    vibrate(bonus === 3 ? [10, 30, 20] : 18);
+    settle(active, true);
+  }
+
+  function burstFromTarget(side, color) {
+    const pane = paneOf(side);
+    const el = elOf(side);
+    const rEl = el.getBoundingClientRect();
+    const rPane = pane.getBoundingClientRect();
+    const x = rEl.left + rEl.width / 2 - rPane.left;
+    const y = rEl.top + rEl.height / 2 - rPane.top;
+    spawnRipple(pane, x, y, color);
+    spawnSparks(pane, x, y, color);
+  }
+
+  function handleTap(side, ev) {
+    if (!S.running) return;
+    if (ev.cancelable) ev.preventDefault();
+
+    const pane = paneOf(side);
+    const rect = pane.getBoundingClientRect();
+    const t = (ev.touches && ev.touches[0]) || ev;
+    const x = (t.clientX || rect.width / 2) - rect.left;
+    const y = (t.clientY || rect.height / 2) - rect.top;
+    spawnRipple(pane, x, y, side === 'top' ? 'var(--top-color)' : 'var(--bot-color)');
+
+    const now = performance.now();
+    if (now < S.graceUntil) return;
+
+    const active = S.active;
+    if (!active) {
+      popupAt(pane, 'EARLY', 'bad');
+      loseLife();
+      S.graceUntil = now + 260;
+      return;
+    }
+
+    if (active.kind === 'solo') {
+      // any tap during a solo decoy = miss
+      popupAt(pane, 'DECOY!', 'bad');
+      loseLife();
+      settle(active, false);
+      return;
+    }
+
+    // pair
+    if (active.tapped[side]) {
+      // ignored extra tap on same side
+      return;
+    }
+    active.tapped[side] = true;
+    elOf(side).classList.add('tapped');
+    vibrate(8);
+    if (active.tapped.top && active.tapped.bot) {
+      awardPair(active);
+    }
+  }
+
+  function tick(ts) {
+    if (!S.running) return;
+    if (!S.startedAt) S.startedAt = ts;
+    S.elapsed = ts - S.startedAt;
+    const now = performance.now();
+    const active = S.active;
+    if (active && !active.settled && now >= active.expireAt) {
+      if (active.kind === 'solo') {
+        // expired without tap = correct ignore, no penalty, gentle fade
+        settle(active, false);
+      } else {
+        // pair expired
+        if (active.tapped.top && active.tapped.bot) {
+          // edge case: both tapped but never resolved (shouldn't happen)
+          awardPair(active);
+        } else {
+          popupAt(paneTop, 'MISS', 'bad');
+          loseLife();
+          settle(active, false);
+        }
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+
+  function start() {
+    S.running = true;
+    S.score = 0;
+    S.lives = 3;
+    S.combo = 0;
+    S.active = null;
+    S.elapsed = 0;
+    S.startedAt = 0;
+    S.graceUntil = 0;
+    setScore();
+    setLives();
+    overlay.style.display = 'none';
+    finalStat.style.display = 'none';
+    // small head-start before first spawn
+    setTimeout(() => { if (S.running) spawnNext(); }, 800);
+    scheduleSpawn();
+    requestAnimationFrame(tick);
+  }
+
+  function gameOver() {
+    S.running = false;
+    clearTimeout(S.spawnTimer);
+    if (S.active) settle(S.active, false);
+    const best = Math.max(S.best, S.score);
+    S.best = best;
+    localStorage.setItem('mirrortap_best', best);
+    finalStat.innerHTML = `SCORE <b style="color:var(--good)">${S.score}</b> &nbsp;/&nbsp; BEST <b>${best}</b>`;
+    finalStat.style.display = '';
+    startBtn.textContent = 'RETRY';
+    overlay.style.display = '';
+    vibrate([20, 60, 20, 60]);
+  }
+
+  // input
+  function bindTap(pane, side) {
+    let lastTouchAt = 0;
+    pane.addEventListener('touchstart', (e) => {
+      lastTouchAt = performance.now();
+      handleTap(side, e);
+    }, { passive: false });
+    pane.addEventListener('mousedown', (e) => {
+      // ignore mouse if a touch just happened (mobile emits both)
+      if (performance.now() - lastTouchAt < 600) return;
+      handleTap(side, e);
+    });
+  }
+  bindTap(paneTop, 'top');
+  bindTap(paneBot, 'bot');
+
+  startBtn.addEventListener('click', start);
+  startBtn.addEventListener('touchstart', (e) => { e.preventDefault(); start(); }, { passive: false });
+
+  document.addEventListener('gesturestart', (e) => e.preventDefault());
+  document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  // best score shown on start screen
+  if (S.best > 0) {
+    const p = document.createElement('p');
+    p.style.color = 'var(--warn)';
+    p.style.marginTop = '10px';
+    p.textContent = 'BEST: ' + S.best;
+    overlay.insertBefore(p, startBtn);
+  }
+})();
+</script>
+</body>
+</html>
