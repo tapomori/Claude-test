@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#06081a">
+<title>Phase Bind</title>
+<style>
+  * { box-sizing: border-box; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  html, body { height: 100%; margin: 0; padding: 0; background: #06081a; color: #cdd6f4; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+  #app { position: fixed; inset: 0; display: flex; flex-direction: column; }
+  header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; font-size: 14px; letter-spacing: 0.08em; z-index: 4; }
+  header a { color: #6c7086; text-decoration: none; font-size: 12px; }
+  header a:active { color: #cba6f7; }
+  .stats { display: flex; gap: 16px; }
+  .stat { display: flex; flex-direction: column; align-items: flex-end; line-height: 1; }
+  .stat .label { font-size: 10px; color: #6c7086; letter-spacing: 0.18em; }
+  .stat .value { font-size: 22px; color: #f5c2e7; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  #stage { position: relative; flex: 1; touch-action: manipulation; cursor: pointer; overflow: hidden; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #message { position: absolute; left: 50%; top: 18%; transform: translate(-50%,-50%); pointer-events: none; text-align: center; opacity: 0; transition: opacity 0.18s ease; }
+  #message.show { opacity: 1; }
+  #message .big { font-size: 30px; letter-spacing: 0.1em; font-weight: 700; text-shadow: 0 0 14px currentColor; }
+  #message .small { font-size: 13px; color: #a6adc8; margin-top: 6px; opacity: 0.9; letter-spacing: 0.05em; }
+  #overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 36px; text-align: center; background: radial-gradient(ellipse at center, rgba(11,14,38,0.92), rgba(6,8,26,0.98)); z-index: 5; }
+  #overlay.hidden { display: none; }
+  #overlay h1 { font-size: 32px; margin: 0 0 18px; letter-spacing: 0.18em; color: #b4befe; text-shadow: 0 0 22px rgba(180,190,254,0.5); }
+  #overlay p { font-size: 14px; color: #a6adc8; line-height: 1.8; margin: 4px 0; max-width: 320px; }
+  #overlay .key { color: #f5c2e7; font-weight: 600; }
+  #overlay button { margin-top: 26px; background: linear-gradient(180deg,#cba6f7,#f5c2e7); color: #11111b; border: 0; padding: 14px 44px; font-size: 16px; font-weight: 800; letter-spacing: 0.14em; border-radius: 999px; box-shadow: 0 6px 24px rgba(203,166,247,0.4); cursor: pointer; }
+  #overlay button:active { transform: translateY(1px); }
+  #overlay .final-score { font-size: 44px; color: #f5c2e7; text-shadow: 0 0 18px rgba(245,194,231,0.55); margin: 10px 0; font-weight: 700; }
+  #overlay .rank { font-size: 16px; color: #fab387; letter-spacing: 0.1em; margin: 4px 0 12px; }
+  #flash { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity 0.22s ease; mix-blend-mode: screen; }
+  #flash.good { background: radial-gradient(circle at center, rgba(166,227,161,0.45), transparent 65%); opacity: 1; }
+  #flash.perfect { background: radial-gradient(circle at center, rgba(245,194,231,0.65), transparent 70%); opacity: 1; }
+  #flash.bad { background: radial-gradient(circle at center, rgba(243,139,168,0.5), transparent 65%); opacity: 1; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <a href="../../index.html">← Gallery</a>
+    <div class="stats">
+      <div class="stat"><span class="label">SCORE</span><span class="value" id="score">0</span></div>
+      <div class="stat"><span class="label">TIME</span><span class="value" id="time">60</span></div>
+    </div>
+  </header>
+  <div id="stage">
+    <canvas id="game"></canvas>
+    <div id="flash"></div>
+    <div id="message"></div>
+    <div id="overlay">
+      <h1>PHASE BIND</h1>
+      <p>レールを昇り降りする<span class="key">光のパルス</span>。</p>
+      <p>すべてが中央の<span class="key">ゲート帯</span>に揃った瞬間に画面をタップ。</p>
+      <p>揃いが完璧なほど高得点。外せばコンボリセット。</p>
+      <p>時が進むとレールが増え、速度も上がる。</p>
+      <button id="startBtn">START</button>
+    </div>
+  </div>
+</div>
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const stage = document.getElementById('stage');
+  const overlay = document.getElementById('overlay');
+  const scoreEl = document.getElementById('score');
+  const timeEl = document.getElementById('time');
+  const flash = document.getElementById('flash');
+  const message = document.getElementById('message');
+
+  let W = 0, H = 0, DPR = 1;
+  let pulses = [];
+  let particles = [];
+  let ringEffects = [];
+  let score = 0;
+  let combo = 0;
+  let bestCombo = 0;
+  let timeLeft = 60;
+  let lastTick = 0;
+  let running = false;
+  let startTime = 0;
+  let messageTimer = 0;
+
+  const RAIL_TOP_FRAC = 0.14;
+  const RAIL_BOTTOM_FRAC = 0.92;
+  const GATE_CENTER_FRAC = 0.50;
+  const GATE_HALF_FRAC = 0.055;
+  const COLORS = ['#89b4fa', '#f5c2e7', '#a6e3a1', '#fab387', '#94e2d5'];
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = stage.clientWidth;
+    H = stage.clientHeight;
+    canvas.width = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', resize);
+
+  function gate() {
+    const c = H * GATE_CENTER_FRAC;
+    const h = H * GATE_HALF_FRAC;
+    return { center: c, top: c - h, bottom: c + h, half: h };
+  }
+
+  function railX(i, n) {
+    const margin = Math.min(W * 0.22, 90);
+    if (n === 1) return W / 2;
+    return margin + (W - 2 * margin) * (i / (n - 1));
+  }
+
+  function railRange() {
+    return { top: H * RAIL_TOP_FRAC, bottom: H * RAIL_BOTTOM_FRAC };
+  }
+
+  function pulseY(p, t) {
+    const r = railRange();
+    const range = r.bottom - r.top;
+    const period = p.period / (p.speedMul || 1);
+    const u = ((t / period) + p.phase) % 1;
+    const tri = u < 0.5 ? (u * 2) : (2 - u * 2);
+    // ease-in-out for prettier motion
+    const eased = tri * tri * (3 - 2 * tri);
+    return r.top + range * eased;
+  }
+
+  function difficultyTier(elapsed) {
+    if (elapsed < 12) return { count: 2, speedMul: 1.0 };
+    if (elapsed < 26) return { count: 3, speedMul: 1.05 };
+    if (elapsed < 42) return { count: 3, speedMul: 1.18 };
+    return { count: 4, speedMul: 1.28 };
+  }
+
+  function spawnPulse(i) {
+    pulses.push({
+      period: 1.7 + Math.random() * 1.7,
+      phase: Math.random(),
+      idx: i,
+      color: COLORS[i % COLORS.length],
+      speedMul: 1
+    });
+  }
+
+  function adjustPulses(elapsed) {
+    const tier = difficultyTier(elapsed);
+    while (pulses.length < tier.count) {
+      spawnPulse(pulses.length);
+    }
+    for (const p of pulses) p.speedMul = tier.speedMul;
+  }
+
+  function start() {
+    resize();
+    score = 0;
+    combo = 0;
+    bestCombo = 0;
+    timeLeft = 60;
+    pulses = [];
+    particles = [];
+    ringEffects = [];
+    spawnPulse(0);
+    spawnPulse(1);
+    running = true;
+    startTime = performance.now() / 1000;
+    lastTick = performance.now() / 1000;
+    overlay.classList.add('hidden');
+    scoreEl.textContent = '0';
+    timeEl.textContent = '60';
+    messageTimer = 0;
+    requestAnimationFrame(loop);
+  }
+
+  function onTap() {
+    if (!running) return;
+    const now = performance.now() / 1000;
+    const elapsed = now - startTime;
+    const g = gate();
+    let maxOff = 0, sumOff = 0;
+    for (const p of pulses) {
+      const y = pulseY(p, elapsed);
+      const off = Math.abs(y - g.center);
+      sumOff += off;
+      if (off > maxOff) maxOff = off;
+    }
+
+    let result, points;
+    if (maxOff < g.half * 0.22) { result = 'perfect'; points = 200 + 40 * combo; }
+    else if (maxOff < g.half * 0.55) { result = 'great'; points = 100 + 20 * combo; }
+    else if (maxOff < g.half) { result = 'good'; points = 40; }
+    else { result = 'miss'; points = -70; }
+
+    if (result === 'miss') {
+      combo = 0;
+    } else {
+      combo++;
+      if (combo > bestCombo) bestCombo = combo;
+    }
+    score = Math.max(0, score + points);
+    scoreEl.textContent = score;
+
+    showMessage(result, points);
+    triggerFlash(result);
+    spawnFx(result);
+    vibrateFor(result);
+
+    if (result !== 'miss') {
+      // gentle re-randomization so syncs feel fresh, not memorized
+      for (const p of pulses) p.phase = (p.phase + 0.07 + Math.random() * 0.08) % 1;
+    }
+  }
+
+  function showMessage(result, points) {
+    const conf = {
+      perfect: { text: 'PERFECT', color: '#f5c2e7' },
+      great:   { text: 'GREAT',   color: '#a6e3a1' },
+      good:    { text: 'GOOD',    color: '#fab387' },
+      miss:    { text: 'MISS',    color: '#f38ba8' }
+    }[result];
+    const sign = points >= 0 ? '+' : '';
+    message.innerHTML = `<div class="big" style="color:${conf.color}">${conf.text}</div>` +
+      `<div class="small">${sign}${points}${combo > 1 ? '   COMBO ×' + combo : ''}</div>`;
+    message.classList.add('show');
+    messageTimer = 0.85;
+  }
+
+  function triggerFlash(result) {
+    flash.className = result === 'miss' ? 'bad' : (result === 'perfect' ? 'perfect' : 'good');
+    setTimeout(() => { flash.className = ''; }, 220);
+  }
+
+  function spawnFx(result) {
+    const g = gate();
+    const cx = W / 2, cy = g.center;
+    if (result === 'miss') {
+      for (let i = 0; i < 12; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const s = 80 + Math.random() * 140;
+        particles.push({ x: cx + (Math.random()-0.5)*40, y: cy + (Math.random()-0.5)*20,
+          vx: Math.cos(a)*s, vy: Math.sin(a)*s, life: 1, age: 0, color: '#f38ba8', size: 3 });
+      }
+    } else {
+      const count = result === 'perfect' ? 40 : result === 'great' ? 26 : 14;
+      const cols = result === 'perfect' ? ['#f5c2e7','#cba6f7','#fab387'] : result === 'great' ? ['#a6e3a1','#94e2d5'] : ['#fab387'];
+      for (let i = 0; i < count; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const s = 100 + Math.random() * 260;
+        particles.push({ x: cx, y: cy, vx: Math.cos(a)*s, vy: Math.sin(a)*s,
+          life: 1, age: 0, color: cols[i % cols.length], size: 2 + Math.random()*2 });
+      }
+      ringEffects.push({ x: cx, y: cy, r: 10, maxR: result === 'perfect' ? 260 : 180, age: 0, life: 0.6,
+        color: result === 'perfect' ? '#f5c2e7' : '#a6e3a1' });
+    }
+    // also spawn small bursts at each pulse position
+    for (const p of pulses) {
+      const x = railX(p.idx, pulses.length);
+      const y = pulseY(p, performance.now()/1000 - startTime);
+      for (let i = 0; i < 8; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const s = 50 + Math.random() * 90;
+        particles.push({ x, y, vx: Math.cos(a)*s, vy: Math.sin(a)*s,
+          life: 1, age: 0, color: result === 'miss' ? '#f38ba8' : p.color, size: 2 });
+      }
+    }
+  }
+
+  function vibrateFor(result) {
+    if (!navigator.vibrate) return;
+    if (result === 'perfect') navigator.vibrate([18, 22, 18]);
+    else if (result === 'great') navigator.vibrate(20);
+    else if (result === 'good') navigator.vibrate(12);
+    else navigator.vibrate(45);
+  }
+
+  function loop(tms) {
+    if (!running) return;
+    const now = tms / 1000;
+    const dt = Math.min(0.05, now - lastTick);
+    lastTick = now;
+    const elapsed = now - startTime;
+    timeLeft = Math.max(0, 60 - elapsed);
+    timeEl.textContent = Math.ceil(timeLeft);
+
+    if (timeLeft <= 0) { endGame(); return; }
+
+    adjustPulses(elapsed);
+
+    // update particles
+    for (const p of particles) {
+      p.age += dt;
+      p.life = 1 - p.age / 0.9;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 260 * dt;
+      p.vx *= 0.96;
+    }
+    particles = particles.filter(p => p.life > 0);
+
+    for (const r of ringEffects) {
+      r.age += dt;
+      r.r = r.maxR * (r.age / r.life);
+    }
+    ringEffects = ringEffects.filter(r => r.age < r.life);
+
+    // message fade
+    if (messageTimer > 0) {
+      messageTimer -= dt;
+      if (messageTimer <= 0) message.classList.remove('show');
+    }
+
+    draw(elapsed);
+    requestAnimationFrame(loop);
+  }
+
+  function draw(t) {
+    // bg gradient
+    const bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, '#0b0e26');
+    bg.addColorStop(1, '#06081a');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    // subtle starfield
+    const stars = 24;
+    for (let i = 0; i < stars; i++) {
+      const sx = ((i * 137.5) % W);
+      const sy = ((i * 89.7) % H);
+      const tw = 0.4 + 0.6 * Math.abs(Math.sin(t * 1.2 + i));
+      ctx.fillStyle = `rgba(180,190,254,${0.08 * tw})`;
+      ctx.fillRect(sx, sy, 2, 2);
+    }
+
+    const g = gate();
+    // gate band
+    const gg = ctx.createLinearGradient(0, g.top, 0, g.bottom);
+    gg.addColorStop(0, 'rgba(203,166,247,0)');
+    gg.addColorStop(0.5, 'rgba(203,166,247,0.18)');
+    gg.addColorStop(1, 'rgba(203,166,247,0)');
+    ctx.fillStyle = gg;
+    ctx.fillRect(0, g.top, W, g.bottom - g.top);
+
+    // gate borders
+    ctx.strokeStyle = 'rgba(203,166,247,0.32)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 6]);
+    ctx.beginPath();
+    ctx.moveTo(0, g.top); ctx.lineTo(W, g.top);
+    ctx.moveTo(0, g.bottom); ctx.lineTo(W, g.bottom);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // center line
+    ctx.strokeStyle = 'rgba(245,194,231,0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, g.center); ctx.lineTo(W, g.center);
+    ctx.stroke();
+
+    // rails
+    const n = pulses.length;
+    const r = railRange();
+    for (let i = 0; i < n; i++) {
+      const x = railX(i, n);
+      const rg = ctx.createLinearGradient(0, r.top, 0, r.bottom);
+      rg.addColorStop(0, 'rgba(108,112,134,0.05)');
+      rg.addColorStop(0.5, 'rgba(108,112,134,0.32)');
+      rg.addColorStop(1, 'rgba(108,112,134,0.05)');
+      ctx.strokeStyle = rg;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x, r.top); ctx.lineTo(x, r.bottom);
+      ctx.stroke();
+    }
+
+    // calculate pulse positions
+    const positions = [];
+    let maxOff = 0;
+    for (let i = 0; i < n; i++) {
+      const p = pulses[i];
+      const y = pulseY(p, t);
+      const x = railX(i, n);
+      positions.push({ x, y, p });
+      maxOff = Math.max(maxOff, Math.abs(y - g.center));
+    }
+
+    // ring effects
+    for (const re of ringEffects) {
+      const alpha = 1 - re.age / re.life;
+      ctx.strokeStyle = re.color + Math.floor(alpha * 255).toString(16).padStart(2, '0');
+      ctx.lineWidth = 3 * alpha + 1;
+      ctx.beginPath();
+      ctx.arc(re.x, re.y, re.r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // sync glow when all in gate
+    const allInGate = maxOff < g.half;
+    if (allInGate) {
+      const factor = 1 - maxOff / g.half; // 0..1
+      const pulse = 0.5 + 0.5 * Math.sin(t * 14);
+      ctx.fillStyle = `rgba(245,194,231,${0.10 * factor + 0.05 * pulse * factor})`;
+      ctx.fillRect(0, g.top, W, g.bottom - g.top);
+      // border highlight
+      ctx.strokeStyle = `rgba(245,194,231,${0.5 + 0.4 * pulse * factor})`;
+      ctx.lineWidth = 2 + 2 * factor;
+      ctx.strokeRect(W * 0.02, g.top, W * 0.96, g.bottom - g.top);
+    }
+
+    // pulses (draw on top)
+    for (const { x, y, p } of positions) {
+      const inGate = Math.abs(y - g.center) < g.half;
+      const glowR = inGate ? 38 : 24;
+      const gd = ctx.createRadialGradient(x, y, 0, x, y, glowR);
+      gd.addColorStop(0, p.color);
+      gd.addColorStop(0.35, p.color + 'aa');
+      gd.addColorStop(1, p.color + '00');
+      ctx.fillStyle = gd;
+      ctx.beginPath();
+      ctx.arc(x, y, glowR, 0, Math.PI * 2);
+      ctx.fill();
+      // core
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(x, y, inGate ? 6 : 4.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // particles
+    for (const pt of particles) {
+      ctx.globalAlpha = Math.max(0, pt.life);
+      ctx.fillStyle = pt.color;
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y, pt.size || 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // combo indicator
+    if (combo >= 2) {
+      ctx.font = '700 13px -apple-system, sans-serif';
+      ctx.fillStyle = '#cba6f7';
+      ctx.textAlign = 'center';
+      ctx.fillText(`COMBO ×${combo}`, W / 2, H * 0.085);
+    }
+  }
+
+  function endGame() {
+    running = false;
+    overlay.classList.remove('hidden');
+    overlay.innerHTML = `
+      <h1>FINISHED</h1>
+      <p>スコア</p>
+      <div class="final-score">${score}</div>
+      <div class="rank">${rank(score)}</div>
+      <p>最大コンボ <span class="key">${bestCombo}</span></p>
+      <button id="restartBtn">もう一度</button>
+    `;
+    document.getElementById('restartBtn').addEventListener('click', start);
+  }
+
+  function rank(s) {
+    if (s >= 5500) return '★★★★★  完璧な共鳴';
+    if (s >= 3500) return '★★★★  達人の指';
+    if (s >= 2000) return '★★★  読みが冴える';
+    if (s >= 800)  return '★★  もう一回';
+    return '★  練習しよう';
+  }
+
+  stage.addEventListener('pointerdown', (e) => {
+    if (!running) return;
+    e.preventDefault();
+    onTap();
+  });
+
+  document.getElementById('startBtn').addEventListener('click', start);
+  resize();
+  document.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+  // initial light draw so overlay shows nice bg
+  draw(0);
+})();
+</script>
+</body>
+</html>
