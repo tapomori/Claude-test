@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#06081a">
+<title>Glyph Trace</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: radial-gradient(ellipse at top, #0a0e2c 0%, #02030a 70%);
+    color: #cfe6ff;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro JP", "Hiragino Sans", sans-serif;
+    touch-action: manipulation;
+    user-select: none; -webkit-user-select: none;
+  }
+  #app {
+    position: relative;
+    width: 100vw; height: 100vh; height: 100dvh;
+    overflow: hidden;
+  }
+  canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    display: block;
+  }
+  .hud {
+    position: absolute;
+    top: env(safe-area-inset-top, 0); left: 0; right: 0;
+    padding: 14px 18px;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    pointer-events: none;
+    z-index: 5;
+    letter-spacing: 0.05em;
+  }
+  .hud .label { font-size: 11px; opacity: 0.55; text-transform: uppercase; letter-spacing: 0.15em; }
+  .hud .value {
+    font-size: 22px; font-weight: 500; color: #fff;
+    text-shadow: 0 0 12px #4eb6ff;
+  }
+  .center-message {
+    position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center; pointer-events: none;
+    z-index: 6;
+    transition: opacity 0.25s;
+  }
+  .center-message .big {
+    font-size: 30px; font-weight: 600;
+    color: #fff;
+    text-shadow: 0 0 18px #5dd9ff, 0 0 36px rgba(120,200,255,0.6);
+    letter-spacing: 0.1em;
+    margin-bottom: 6px;
+  }
+  .center-message .sub {
+    font-size: 13px; opacity: 0.75;
+    letter-spacing: 0.08em;
+  }
+  .overlay {
+    position: absolute; inset: 0;
+    background: rgba(2,4,14,0.78);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 10;
+    text-align: center; padding: 24px;
+  }
+  .overlay h1 {
+    font-size: 40px; margin: 0 0 8px;
+    background: linear-gradient(120deg, #6df1ff, #c594ff);
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent;
+    letter-spacing: 0.06em;
+  }
+  .overlay p {
+    opacity: 0.78; max-width: 320px; line-height: 1.6;
+    font-size: 14px; margin: 8px 0 22px;
+    color: #cfe6ff;
+  }
+  .btn {
+    padding: 14px 36px;
+    border: 1px solid rgba(120, 200, 255, 0.55);
+    background: rgba(40,90,160, 0.25);
+    color: #e7f6ff;
+    border-radius: 999px;
+    font-size: 15px; font-weight: 500; letter-spacing: 0.18em;
+    cursor: pointer;
+    transition: all 0.18s;
+    backdrop-filter: blur(6px);
+  }
+  .btn:active {
+    background: rgba(100, 180, 255, 0.4);
+    transform: scale(0.95);
+  }
+  .back {
+    position: absolute;
+    bottom: calc(env(safe-area-inset-bottom, 0) + 8px);
+    left: 12px;
+    padding: 10px 14px;
+    color: #8ab9d6;
+    font-size: 12px;
+    text-decoration: none;
+    z-index: 7;
+    opacity: 0.6;
+    letter-spacing: 0.06em;
+  }
+  .back:active { opacity: 1; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="game"></canvas>
+
+  <div class="hud">
+    <div>
+      <div class="label">Level</div>
+      <div class="value" id="level">1</div>
+    </div>
+    <div style="text-align:right">
+      <div class="label">Score</div>
+      <div class="value" id="score">0</div>
+    </div>
+  </div>
+
+  <div class="center-message hidden" id="msg">
+    <div class="big" id="msgBig"></div>
+    <div class="sub" id="msgSub"></div>
+  </div>
+
+  <div class="overlay" id="title">
+    <h1>Glyph Trace</h1>
+    <p>順番に光る星をなぞった軌跡を覚え、消えてから同じ順にタップして再現せよ。星はゆっくり漂うから、位置と順番を頭に焼き付けて。</p>
+    <button class="btn" id="startBtn">START</button>
+  </div>
+
+  <div class="overlay hidden" id="gameover">
+    <h1 id="goTitle">GLYPH LOST</h1>
+    <p id="goSummary"></p>
+    <button class="btn" id="restartBtn">RETRY</button>
+  </div>
+
+  <a class="back" href="../../index.html">← ギャラリーへ</a>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  let W = 0, H = 0, DPR = 1;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  const State = { TITLE: 'title', SHOWING: 'showing', INPUT: 'input', BETWEEN: 'between', OVER: 'over' };
+  let state = State.TITLE;
+
+  let stars = [];
+  let sequence = [];
+  let inputIdx = 0;
+  let level = 1;
+  let score = 0;
+  let showStartTime = 0;
+  let showPathProgress = 0;
+  let pathTrails = [];
+  let particles = [];
+  let bgStars = [];
+  let flash = 0;
+  let flashColor = '#fff';
+  let shakeAmp = 0;
+  let inputStartTime = 0;
+
+  for (let i = 0; i < 90; i++) {
+    bgStars.push({
+      x: Math.random(), y: Math.random(),
+      r: Math.random() * 1.2 + 0.2,
+      a: Math.random() * 0.55 + 0.1,
+      tw: Math.random() * Math.PI * 2,
+      twS: 0.001 + Math.random() * 0.0025
+    });
+  }
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+
+  function makeStars(count) {
+    stars = [];
+    const margin = 56;
+    const top = 120;
+    const bottom = H - 130;
+    for (let i = 0; i < count; i++) {
+      let placed = false;
+      for (let a = 0; a < 250; a++) {
+        const x = rand(margin, W - margin);
+        const y = rand(top, bottom);
+        let ok = true;
+        const minDist = Math.min(110, (W - margin*2) / (count + 1) + 30);
+        for (const s of stars) {
+          const dx = s.x - x, dy = s.y - y;
+          if (dx*dx + dy*dy < minDist*minDist) { ok = false; break; }
+        }
+        if (ok) {
+          const angle = rand(0, Math.PI * 2);
+          const baseSpeed = 6 + level * 1.6;
+          const speed = rand(baseSpeed * 0.6, baseSpeed * 1.1);
+          stars.push({
+            x, y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            r: 14,
+            pulse: Math.random() * Math.PI * 2,
+            litUntil: 0,
+            tappedAt: -1,
+            seqIndex: -1
+          });
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) {
+        stars.push({
+          x: rand(margin, W - margin), y: rand(top, bottom),
+          vx: 0, vy: 0, r: 14, pulse: 0,
+          litUntil: 0, tappedAt: -1, seqIndex: -1
+        });
+      }
+    }
+    sequence = stars.map((_, i) => i);
+    for (let i = sequence.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [sequence[i], sequence[j]] = [sequence[j], sequence[i]];
+    }
+    sequence.forEach((si, i) => { stars[si].seqIndex = i; });
+  }
+
+  function startLevel() {
+    const count = Math.min(3 + Math.floor((level - 1) * 0.7), 8);
+    makeStars(count);
+    state = State.SHOWING;
+    showStartTime = performance.now();
+    showPathProgress = 0;
+    pathTrails = [];
+    inputIdx = 0;
+    showMessage(`Level ${level}`, '順を覚えて…', 900);
+  }
+
+  function showMessage(big, sub, dur) {
+    const msg = document.getElementById('msg');
+    document.getElementById('msgBig').textContent = big;
+    document.getElementById('msgSub').textContent = sub;
+    msg.classList.remove('hidden');
+    msg.style.opacity = '1';
+    clearTimeout(showMessage._t);
+    showMessage._t = setTimeout(() => {
+      msg.style.opacity = '0';
+      setTimeout(() => msg.classList.add('hidden'), 280);
+    }, dur);
+  }
+
+  function spawnParticles(x, y, color, count, opts) {
+    opts = opts || {};
+    const speed = opts.speed || 3;
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const v = (0.4 + Math.random()) * speed;
+      particles.push({
+        x, y,
+        vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+        life: 1, dec: 0.012 + Math.random() * 0.022,
+        size: 1 + Math.random() * 2.5,
+        color
+      });
+    }
+  }
+
+  function flashScreen(color, intensity) {
+    flash = intensity;
+    flashColor = color;
+  }
+
+  function pointerPos(e) {
+    if (e.touches && e.touches.length) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    if (e.changedTouches && e.changedTouches.length) return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+    return { x: e.clientX, y: e.clientY };
+  }
+
+  function onTap(x, y) {
+    if (state !== State.INPUT) return;
+    let hit = -1; let best = Infinity;
+    const hitR = 40;
+    for (let i = 0; i < stars.length; i++) {
+      if (stars[i].tappedAt > 0) continue;
+      const dx = stars[i].x - x, dy = stars[i].y - y;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      if (d < hitR && d < best) { best = d; hit = i; }
+    }
+    if (hit < 0) {
+      spawnParticles(x, y, '#5e88aa', 6, { speed: 2 });
+      return;
+    }
+    const expected = sequence[inputIdx];
+    if (hit === expected) {
+      stars[hit].tappedAt = performance.now();
+      spawnParticles(stars[hit].x, stars[hit].y, '#7df0ff', 24, { speed: 4 });
+      if (navigator.vibrate) navigator.vibrate(15);
+      if (inputIdx > 0) {
+        const prev = sequence[inputIdx - 1];
+        pathTrails.push({
+          fromIdx: prev,
+          toIdx: hit,
+          life: 1
+        });
+      }
+      inputIdx++;
+      score += 10 + level;
+      updateHUD();
+      if (inputIdx >= sequence.length) {
+        const elapsed = (performance.now() - inputStartTime) / 1000;
+        const timeBonus = Math.max(0, Math.floor(60 - elapsed * 5));
+        const bonus = timeBonus + level * 25;
+        score += bonus;
+        updateHUD();
+        state = State.BETWEEN;
+        flashScreen('#7df0ff', 0.35);
+        showMessage('CLEAR', `+${bonus}`, 1100);
+        spawnParticles(stars[hit].x, stars[hit].y, '#fff', 40, { speed: 6 });
+        if (navigator.vibrate) navigator.vibrate([20, 30, 40]);
+        setTimeout(() => {
+          level++;
+          startLevel();
+        }, 1300);
+      }
+    } else {
+      stars[hit].tappedAt = performance.now();
+      spawnParticles(stars[hit].x, stars[hit].y, '#ff6088', 32, { speed: 5 });
+      if (navigator.vibrate) navigator.vibrate([35, 50, 80]);
+      flashScreen('#ff5070', 0.55);
+      shakeAmp = 14;
+      gameOver();
+    }
+  }
+
+  canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const p = pointerPos(e);
+    onTap(p.x, p.y);
+  }, { passive: false });
+  canvas.addEventListener('mousedown', (e) => {
+    const p = pointerPos(e);
+    onTap(p.x, p.y);
+  });
+
+  function updateHUD() {
+    document.getElementById('level').textContent = level;
+    document.getElementById('score').textContent = score;
+  }
+
+  function gameOver() {
+    state = State.OVER;
+    setTimeout(() => {
+      document.getElementById('goTitle').textContent = 'GLYPH LOST';
+      document.getElementById('goSummary').textContent = `到達 Level ${level}  /  Score ${score}`;
+      document.getElementById('gameover').classList.remove('hidden');
+    }, 650);
+  }
+
+  function reset() {
+    level = 1; score = 0;
+    updateHUD();
+    document.getElementById('gameover').classList.add('hidden');
+    document.getElementById('title').classList.add('hidden');
+    pathTrails = []; particles = [];
+    startLevel();
+  }
+
+  document.getElementById('startBtn').addEventListener('click', reset);
+  document.getElementById('restartBtn').addEventListener('click', reset);
+
+  let last = performance.now();
+  function loop(t) {
+    const dt = Math.min(50, t - last);
+    last = t;
+    update(dt);
+    render(t);
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  function update(dt) {
+    for (const b of bgStars) b.tw += dt * b.twS;
+
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx; p.y += p.vy;
+      p.vx *= 0.96; p.vy *= 0.96;
+      p.life -= p.dec;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+
+    for (let i = pathTrails.length - 1; i >= 0; i--) {
+      pathTrails[i].life -= dt * 0.0005;
+      if (pathTrails[i].life <= 0) pathTrails.splice(i, 1);
+    }
+
+    if (state === State.INPUT || state === State.BETWEEN) {
+      for (const s of stars) {
+        s.x += s.vx * dt * 0.001;
+        s.y += s.vy * dt * 0.001;
+        s.pulse += dt * 0.005;
+        const margin = 46;
+        const topB = 110;
+        const botB = H - 120;
+        if (s.x < margin) { s.x = margin; s.vx = Math.abs(s.vx); }
+        if (s.x > W - margin) { s.x = W - margin; s.vx = -Math.abs(s.vx); }
+        if (s.y < topB) { s.y = topB; s.vy = Math.abs(s.vy); }
+        if (s.y > botB) { s.y = botB; s.vy = -Math.abs(s.vy); }
+      }
+    } else {
+      for (const s of stars) s.pulse += dt * 0.005;
+    }
+
+    if (state === State.SHOWING) {
+      const elapsed = (performance.now() - showStartTime) / 1000;
+      const startDelay = 0.55;
+      const perSeg = Math.max(0.45, 0.95 - level * 0.04);
+      const e = elapsed - startDelay;
+      if (e > 0) {
+        showPathProgress = Math.min(e / perSeg, sequence.length - 1);
+      } else {
+        showPathProgress = 0;
+      }
+      for (let i = 0; i < sequence.length; i++) {
+        const star = stars[sequence[i]];
+        if (i <= Math.floor(showPathProgress) + 0.0001) {
+          star.litUntil = performance.now() + 250;
+        }
+      }
+      const total = startDelay + perSeg * (sequence.length - 1) + 0.75;
+      if (elapsed > total) {
+        state = State.INPUT;
+        inputStartTime = performance.now();
+        for (const s of stars) s.litUntil = 0;
+      }
+    }
+
+    flash *= 0.92;
+    shakeAmp *= 0.85;
+  }
+
+  function render(t) {
+    ctx.save();
+    if (shakeAmp > 0.4) {
+      ctx.translate((Math.random() - 0.5) * shakeAmp, (Math.random() - 0.5) * shakeAmp);
+    }
+    ctx.clearRect(0, 0, W, H);
+
+    for (const b of bgStars) {
+      const a = b.a * (0.6 + 0.4 * Math.sin(b.tw));
+      ctx.fillStyle = `rgba(180,210,255,${a.toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(b.x * W, b.y * H, b.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    if (state === State.SHOWING) {
+      ctx.lineCap = 'round';
+      const segs = Math.floor(showPathProgress);
+      const frac = showPathProgress - segs;
+      for (let i = 0; i < segs + 1 && i < sequence.length - 1; i++) {
+        const a = stars[sequence[i]];
+        const b = stars[sequence[i + 1]];
+        const f = i < segs ? 1 : frac;
+        const x2 = a.x + (b.x - a.x) * f;
+        const y2 = a.y + (b.y - a.y) * f;
+        ctx.strokeStyle = `rgba(160,235,255,${(0.85).toFixed(2)})`;
+        ctx.shadowColor = '#7df0ff';
+        ctx.shadowBlur = 18;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+      ctx.shadowBlur = 0;
+    }
+
+    for (const tr of pathTrails) {
+      const a = stars[tr.fromIdx];
+      const b = stars[tr.toIdx];
+      if (!a || !b) continue;
+      ctx.strokeStyle = `rgba(125,240,255,${(tr.life * 0.85).toFixed(3)})`;
+      ctx.shadowColor = '#7df0ff';
+      ctx.shadowBlur = 10;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+
+    for (let i = 0; i < stars.length; i++) {
+      const s = stars[i];
+      const lit = performance.now() < s.litUntil;
+      const tapped = s.tappedAt > 0;
+      const showingNumber = state === State.SHOWING && lit;
+      const pulse = 1 + 0.1 * Math.sin(s.pulse);
+      const r = s.r * pulse;
+
+      const glowR = r * (lit || tapped ? 4.2 : 2.4);
+      const grad = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, glowR);
+      const baseCol = tapped ? '125,240,255' : (lit ? '255,255,255' : '120,170,220');
+      grad.addColorStop(0, `rgba(${baseCol}, ${lit || tapped ? 0.5 : 0.22})`);
+      grad.addColorStop(1, `rgba(${baseCol}, 0)`);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, glowR, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = tapped ? '#dffaff' : (lit ? '#ffffff' : '#a9d2ff');
+      ctx.shadowColor = tapped ? '#7df0ff' : '#a9d2ff';
+      ctx.shadowBlur = lit || tapped ? 24 : 8;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r * 0.55, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      if (showingNumber) {
+        ctx.fillStyle = '#06121f';
+        ctx.font = '600 14px -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(String(s.seqIndex + 1), s.x, s.y + 1);
+      }
+    }
+
+    for (const p of particles) {
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fillStyle = p.color;
+      ctx.shadowColor = p.color;
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+
+    if (state === State.INPUT) {
+      const next = stars[sequence[inputIdx]];
+      if (next) {
+        ctx.strokeStyle = 'rgba(150,220,255,0.18)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 6]);
+        ctx.beginPath();
+        ctx.arc(next.x, next.y, 30 + 4 * Math.sin(performance.now() * 0.005), 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
+    if (flash > 0.02) {
+      ctx.fillStyle = flashColor;
+      ctx.globalAlpha = flash * 0.45;
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = 1;
+    }
+
+    ctx.restore();
+  }
+
+  updateHUD();
+})();
+</script>
+</body>
+</html>
