@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0820">
+<title>Arrow Bloom</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0;
+    width: 100%; height: 100%;
+    background: radial-gradient(ellipse at 50% 30%, #1b1448 0%, #0b0820 60%, #050214 100%);
+    color: #fef7ff;
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif;
+    overflow: hidden;
+    overscroll-behavior: none;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+  }
+  body { touch-action: manipulation; }
+  #stage {
+    position: fixed; inset: 0;
+    width: 100%; height: 100%;
+    touch-action: none;
+  }
+  #hud {
+    position: fixed;
+    top: env(safe-area-inset-top, 0px);
+    left: 0; right: 0;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 18px;
+    font-weight: 600;
+    pointer-events: none;
+    z-index: 5;
+    text-shadow: 0 0 8px rgba(0,0,0,0.6);
+  }
+  #score, #time, #combo {
+    background: rgba(20, 12, 50, 0.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border-radius: 14px;
+    padding: 8px 14px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.05em;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  #combo {
+    transition: transform 0.18s ease, color 0.18s ease;
+  }
+  #combo.pop { transform: scale(1.18); color: #ffe88a; }
+  .label { font-size: 10px; opacity: 0.6; text-transform: uppercase; display: block; }
+  .value { font-size: 18px; }
+  #back {
+    position: fixed;
+    top: env(safe-area-inset-top, 0px);
+    right: 50%;
+    transform: translateX(50%);
+    margin-top: 4px;
+    z-index: 6;
+  }
+  #back a {
+    color: #cdb7ff;
+    text-decoration: none;
+    background: rgba(20, 12, 50, 0.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,255,255,0.08);
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+  }
+  #overlay {
+    position: fixed; inset: 0;
+    background: radial-gradient(ellipse at center, rgba(20,8,60,0.85), rgba(5,2,20,0.95));
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center;
+    z-index: 10;
+    backdrop-filter: blur(8px);
+    transition: opacity 0.4s ease;
+    padding: 24px;
+  }
+  #overlay.hidden { opacity: 0; pointer-events: none; }
+  #overlay h1 {
+    margin: 0 0 8px;
+    font-size: 38px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    background: linear-gradient(135deg, #ffd6f1, #b5e0ff, #ffe88a);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    filter: drop-shadow(0 0 18px rgba(180,140,255,0.5));
+  }
+  #overlay p {
+    margin: 6px 0;
+    color: #cdb7ff;
+    font-size: 14px;
+    max-width: 280px;
+    line-height: 1.6;
+  }
+  #overlay .score-big {
+    font-size: 56px;
+    font-weight: 800;
+    color: #ffe88a;
+    margin: 12px 0;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 0 20px rgba(255,232,138,0.5);
+  }
+  #startBtn, #againBtn {
+    margin-top: 22px;
+    padding: 14px 36px;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    background: linear-gradient(135deg, #ff6ac1, #6f63ff);
+    color: #fff;
+    border: none;
+    border-radius: 999px;
+    cursor: pointer;
+    box-shadow: 0 8px 30px rgba(255,106,193,0.4), 0 0 0 1px rgba(255,255,255,0.15) inset;
+    transition: transform 0.15s ease;
+  }
+  #startBtn:active, #againBtn:active { transform: scale(0.96); }
+  .hint {
+    margin-top: 16px;
+    font-size: 12px;
+    color: rgba(205, 183, 255, 0.7);
+    line-height: 1.7;
+  }
+  .swatch {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    margin: 0 2px;
+    vertical-align: middle;
+  }
+</style>
+</head>
+<body>
+  <canvas id="stage"></canvas>
+  <div id="hud">
+    <div id="score"><span class="label">Score</span><span class="value" id="scoreVal">0</span></div>
+    <div id="combo"><span class="label">Combo</span><span class="value" id="comboVal">x1</span></div>
+    <div id="time"><span class="label">Time</span><span class="value" id="timeVal">60</span></div>
+  </div>
+  <div id="back"><a href="../../index.html">← Gallery</a></div>
+
+  <div id="overlay">
+    <h1>ARROW<br>BLOOM</h1>
+    <p>下から指で引いて離すと光の矢が飛ぶ。<br>つぼみを貫いて咲かせよう。</p>
+    <p class="hint">
+      同じ色を続けて貫くとコンボ。<br>
+      一本の矢で複数を貫けば一気に咲く。
+    </p>
+    <button id="startBtn">START</button>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('stage');
+  const ctx = canvas.getContext('2d');
+  const overlay = document.getElementById('overlay');
+  const startBtn = document.getElementById('startBtn');
+  const scoreEl = document.getElementById('scoreVal');
+  const timeEl = document.getElementById('timeVal');
+  const comboEl = document.getElementById('comboVal');
+
+  let W = 0, H = 0, DPR = 1;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W * DPR;
+    canvas.height = H * DPR;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', resize);
+
+  const COLORS = [
+    { id: 0, base: '#ff6ac1', glow: 'rgba(255,106,193,0.6)', name: 'rose' },
+    { id: 1, base: '#5dd3ff', glow: 'rgba(93,211,255,0.6)', name: 'cyan' },
+    { id: 2, base: '#ffe06a', glow: 'rgba(255,224,106,0.6)', name: 'gold' },
+    { id: 3, base: '#9b7bff', glow: 'rgba(155,123,255,0.6)', name: 'violet' },
+  ];
+
+  // Game state
+  let buds = [];
+  let arrows = [];
+  let particles = [];
+  let blooms = [];
+  let stars = [];
+  let aim = null; // { startX, startY, x, y, pointerId }
+  let bowX, bowY;
+  let score = 0;
+  let combo = 0;
+  let lastColor = -1;
+  let timeLeft = 60;
+  let running = false;
+  let lastT = 0;
+  let elapsed = 0;
+  let shakeT = 0, shakeAmp = 0;
+
+  function initStars() {
+    stars = [];
+    for (let i = 0; i < 60; i++) {
+      stars.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        r: Math.random() * 1.2 + 0.3,
+        a: Math.random() * 0.5 + 0.2,
+        tw: Math.random() * Math.PI * 2,
+      });
+    }
+  }
+
+  function setupBow() {
+    bowX = W / 2;
+    bowY = H - Math.max(80, H * 0.13);
+  }
+
+  function spawnBud() {
+    const margin = 40;
+    const x = margin + Math.random() * (W - margin * 2);
+    // Spawn in the top 60% of the play area
+    const maxY = H * 0.6;
+    const y = 70 + Math.random() * (maxY - 70);
+    const colorIdx = Math.floor(Math.random() * COLORS.length);
+    const vx = (Math.random() - 0.5) * 0.06;
+    const vy = (Math.random() - 0.5) * 0.04;
+    buds.push({
+      x, y, r: 16 + Math.random() * 6,
+      color: colorIdx,
+      vx, vy,
+      phase: Math.random() * Math.PI * 2,
+      hp: 1,
+      bornAt: elapsed,
+      pulse: 0,
+    });
+  }
+
+  function initBuds() {
+    buds = [];
+    const count = 7;
+    for (let i = 0; i < count; i++) spawnBud();
+  }
+
+  function startGame() {
+    score = 0;
+    combo = 0;
+    lastColor = -1;
+    timeLeft = 60;
+    elapsed = 0;
+    arrows = [];
+    particles = [];
+    blooms = [];
+    buds = [];
+    setupBow();
+    initStars();
+    initBuds();
+    running = true;
+    overlay.classList.add('hidden');
+    updateHUD();
+    lastT = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  function endGame() {
+    running = false;
+    overlay.innerHTML = `
+      <h1>BLOOMED</h1>
+      <div class="score-big">${score}</div>
+      <p>最高コンボ: x${maxCombo}</p>
+      <button id="againBtn">もう一度</button>
+      <p class="hint">同色連鎖でスコアが大きく伸びる。<br>色を読む順番が勝負。</p>
+    `;
+    overlay.classList.remove('hidden');
+    document.getElementById('againBtn').addEventListener('click', startGame, { passive: true });
+  }
+
+  let maxCombo = 0;
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    timeEl.textContent = Math.max(0, Math.ceil(timeLeft));
+    comboEl.textContent = 'x' + (combo + 1);
+  }
+
+  function vibrate(ms) {
+    if (navigator.vibrate) {
+      try { navigator.vibrate(ms); } catch (e) {}
+    }
+  }
+
+  // Input
+  function getPos(ev) {
+    if (ev.touches && ev.touches.length > 0) {
+      const t = ev.touches[0];
+      return { x: t.clientX, y: t.clientY, id: t.identifier };
+    } else if (ev.changedTouches && ev.changedTouches.length > 0) {
+      const t = ev.changedTouches[0];
+      return { x: t.clientX, y: t.clientY, id: t.identifier };
+    }
+    return { x: ev.clientX, y: ev.clientY, id: -1 };
+  }
+
+  function onDown(ev) {
+    if (!running) return;
+    ev.preventDefault();
+    const p = getPos(ev);
+    // Always anchor at bow position
+    aim = { startX: bowX, startY: bowY, x: p.x, y: p.y };
+  }
+
+  function onMove(ev) {
+    if (!aim || !running) return;
+    ev.preventDefault();
+    const p = getPos(ev);
+    aim.x = p.x;
+    aim.y = p.y;
+  }
+
+  function onUp(ev) {
+    if (!aim || !running) return;
+    ev.preventDefault();
+    const dx = aim.startX - aim.x;
+    const dy = aim.startY - aim.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 18) {
+      // Fire arrow in the direction from drag-point toward bow (slingshot)
+      const power = Math.min(dist, 180);
+      const speed = 0.5 + power * 0.06;
+      const ang = Math.atan2(dy, dx);
+      arrows.push({
+        x: bowX, y: bowY,
+        vx: Math.cos(ang) * speed,
+        vy: Math.sin(ang) * speed,
+        ang,
+        life: 0,
+        trail: [],
+        hitColor: -1,
+        chainHere: 0,
+      });
+      vibrate(14);
+      // tiny shake when release
+      shakeT = 80; shakeAmp = 3;
+    }
+    aim = null;
+  }
+
+  canvas.addEventListener('touchstart', onDown, { passive: false });
+  canvas.addEventListener('touchmove', onMove, { passive: false });
+  canvas.addEventListener('touchend', onUp, { passive: false });
+  canvas.addEventListener('touchcancel', onUp, { passive: false });
+  canvas.addEventListener('mousedown', onDown);
+  canvas.addEventListener('mousemove', onMove);
+  canvas.addEventListener('mouseup', onUp);
+  canvas.addEventListener('mouseleave', onUp);
+
+  // Collision: segment vs circle
+  function segCircle(x1, y1, x2, y2, cx, cy, cr) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const len2 = dx * dx + dy * dy;
+    if (len2 === 0) return Math.hypot(x1 - cx, y1 - cy) <= cr;
+    let t = ((cx - x1) * dx + (cy - y1) * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    const px = x1 + t * dx, py = y1 + t * dy;
+    return Math.hypot(px - cx, py - cy) <= cr;
+  }
+
+  function burstParticles(x, y, color, amount = 18) {
+    const c = COLORS[color];
+    for (let i = 0; i < amount; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const sp = 0.6 + Math.random() * 2.2;
+      particles.push({
+        x, y,
+        vx: Math.cos(ang) * sp,
+        vy: Math.sin(ang) * sp,
+        life: 600 + Math.random() * 400,
+        age: 0,
+        size: 1.5 + Math.random() * 2.5,
+        color: c.base,
+        glow: c.glow,
+      });
+    }
+    blooms.push({
+      x, y,
+      r: 0,
+      maxR: 60 + Math.random() * 20,
+      age: 0,
+      life: 700,
+      color: c.base,
+      glow: c.glow,
+    });
+  }
+
+  function hitBud(arrow, bud) {
+    if (bud.hp <= 0) return;
+    bud.hp = 0;
+    arrow.chainHere++;
+    // Combo logic
+    let comboMult = 1;
+    if (arrow.hitColor === -1) {
+      // First hit of this arrow
+      if (lastColor === bud.color) {
+        combo++;
+      } else {
+        combo = 0;
+      }
+      lastColor = bud.color;
+      arrow.hitColor = bud.color;
+    } else if (arrow.hitColor === bud.color) {
+      combo++;
+    } else {
+      // Different color in same arrow shot still counts as a chain reset? Keep combo, but no bonus
+      // Treat as breaking the streak
+      combo = 0;
+      lastColor = bud.color;
+      arrow.hitColor = bud.color;
+    }
+    comboMult = 1 + combo * 0.3;
+    const pierceBonus = arrow.chainHere; // each subsequent bud in same arrow worth more
+    const gained = Math.round(10 * comboMult * pierceBonus);
+    score += gained;
+    if (combo > maxCombo) maxCombo = combo;
+    burstParticles(bud.x, bud.y, bud.color, 18 + Math.min(arrow.chainHere * 4, 20));
+    vibrate(8 + Math.min(combo, 6) * 2);
+    comboEl.parentElement.classList.add('pop');
+    setTimeout(() => comboEl.parentElement.classList.remove('pop'), 180);
+    // Replace bud
+    setTimeout(() => {
+      if (running) spawnBud();
+    }, 350);
+  }
+
+  function update(dt) {
+    elapsed += dt;
+    timeLeft -= dt / 1000;
+    if (timeLeft <= 0) {
+      timeLeft = 0;
+      endGame();
+      return;
+    }
+
+    // Buds drift, gently steered
+    for (const b of buds) {
+      if (b.hp <= 0) continue;
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      b.phase += dt * 0.003;
+      if (b.x < 30) b.vx = Math.abs(b.vx);
+      if (b.x > W - 30) b.vx = -Math.abs(b.vx);
+      if (b.y < 60) b.vy = Math.abs(b.vy);
+      if (b.y > H * 0.6) b.vy = -Math.abs(b.vy);
+      // small wobble in velocity over time
+      b.vx += (Math.random() - 0.5) * 0.001 * dt;
+      b.vy += (Math.random() - 0.5) * 0.0008 * dt;
+      const speed = Math.hypot(b.vx, b.vy);
+      const cap = 0.12;
+      if (speed > cap) { b.vx *= cap / speed; b.vy *= cap / speed; }
+    }
+    // Difficulty: every 12 sec add a bud, cap at 11
+    const target = Math.min(11, 7 + Math.floor((60 - timeLeft) / 12));
+    if (buds.filter(b => b.hp > 0).length < target && Math.random() < 0.02) {
+      spawnBud();
+    }
+    // Cull dead buds occasionally
+    buds = buds.filter(b => b.hp > 0);
+
+    // Arrows
+    for (const a of arrows) {
+      a.life += dt;
+      const prevX = a.x, prevY = a.y;
+      a.x += a.vx * dt;
+      a.y += a.vy * dt;
+      a.trail.push({ x: a.x, y: a.y, age: 0 });
+      if (a.trail.length > 20) a.trail.shift();
+      for (const t of a.trail) t.age += dt;
+      // collide with buds along segment
+      for (const b of buds) {
+        if (b.hp <= 0) continue;
+        if (segCircle(prevX, prevY, a.x, a.y, b.x, b.y, b.r + 6)) {
+          hitBud(a, b);
+        }
+      }
+    }
+    // Cull arrows offscreen
+    arrows = arrows.filter(a => a.x > -40 && a.x < W + 40 && a.y > -40 && a.y < H + 40 && a.life < 6000);
+
+    // Particles
+    for (const p of particles) {
+      p.age += dt;
+      p.x += p.vx * dt * 0.06;
+      p.y += p.vy * dt * 0.06;
+      p.vy += 0.0008 * dt; // slight gravity
+      p.vx *= Math.pow(0.985, dt / 16);
+      p.vy *= Math.pow(0.99, dt / 16);
+    }
+    particles = particles.filter(p => p.age < p.life);
+
+    // Blooms
+    for (const b of blooms) {
+      b.age += dt;
+      const t = Math.min(1, b.age / b.life);
+      b.r = b.maxR * (1 - Math.pow(1 - t, 3));
+    }
+    blooms = blooms.filter(b => b.age < b.life);
+
+    // Stars twinkle
+    for (const s of stars) {
+      s.tw += dt * 0.002;
+    }
+
+    // shake decay
+    if (shakeT > 0) shakeT -= dt;
+  }
+
+  function drawStars() {
+    for (const s of stars) {
+      const a = s.a * (0.7 + 0.3 * Math.sin(s.tw));
+      ctx.beginPath();
+      ctx.fillStyle = `rgba(255, 240, 255, ${a})`;
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawBlooms() {
+    for (const b of blooms) {
+      const t = b.age / b.life;
+      const alpha = (1 - t) * 0.6;
+      const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r);
+      g.addColorStop(0, b.color);
+      g.addColorStop(0.4, b.glow);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function drawBud(b) {
+    const c = COLORS[b.color];
+    // outer glow halo
+    const glowR = b.r * 2.4;
+    const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, glowR);
+    g.addColorStop(0, c.glow);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, glowR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // bud "petals" (3 overlapping ellipses)
+    const wobble = Math.sin(b.phase) * 0.18;
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    for (let i = 0; i < 3; i++) {
+      const ang = (i / 3) * Math.PI * 2 + b.phase * 0.4;
+      ctx.save();
+      ctx.rotate(ang);
+      ctx.fillStyle = c.base;
+      ctx.globalAlpha = 0.85;
+      ctx.beginPath();
+      ctx.ellipse(0, -b.r * 0.4, b.r * 0.55, b.r * 0.9, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    // core
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(0, 0, b.r * 0.32, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = c.base;
+    ctx.beginPath();
+    ctx.arc(0, 0, b.r * 0.22, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawArrow(a) {
+    // trail
+    for (let i = 0; i < a.trail.length - 1; i++) {
+      const t1 = a.trail[i], t2 = a.trail[i + 1];
+      const alpha = (i / a.trail.length) * 0.6;
+      ctx.strokeStyle = `rgba(255, 232, 170, ${alpha})`;
+      ctx.lineWidth = 2 + i * 0.15;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(t1.x, t1.y);
+      ctx.lineTo(t2.x, t2.y);
+      ctx.stroke();
+    }
+    // arrow head
+    ctx.save();
+    ctx.translate(a.x, a.y);
+    ctx.rotate(a.ang);
+    const grad = ctx.createLinearGradient(-12, 0, 12, 0);
+    grad.addColorStop(0, 'rgba(255, 232, 170, 0)');
+    grad.addColorStop(1, '#fff5c8');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(12, 0);
+    ctx.lineTo(-10, -4);
+    ctx.lineTo(-6, 0);
+    ctx.lineTo(-10, 4);
+    ctx.closePath();
+    ctx.fill();
+    // glow
+    ctx.shadowColor = '#ffe88a';
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(8, 0, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawBow() {
+    // bow base
+    ctx.save();
+    ctx.translate(bowX, bowY);
+    // soft glow base
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 50);
+    g.addColorStop(0, 'rgba(155, 123, 255, 0.35)');
+    g.addColorStop(1, 'rgba(155, 123, 255, 0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, 50, 0, Math.PI * 2);
+    ctx.fill();
+    // base ring
+    ctx.strokeStyle = 'rgba(205,183,255,0.5)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, 18, 0, Math.PI * 2);
+    ctx.stroke();
+    // center
+    ctx.fillStyle = '#cdb7ff';
+    ctx.beginPath();
+    ctx.arc(0, 0, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawAim() {
+    if (!aim) return;
+    const dx = aim.startX - aim.x;
+    const dy = aim.startY - aim.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 6) return;
+    const power = Math.min(dist, 180) / 180;
+    // pulled string (visual line from finger to bow)
+    ctx.strokeStyle = `rgba(255, 232, 170, ${0.4 + power * 0.4})`;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(bowX, bowY);
+    ctx.lineTo(aim.x, aim.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // predicted direction (dotted)
+    const ang = Math.atan2(dy, dx);
+    const len = 30 + power * 160;
+    ctx.strokeStyle = `rgba(255, 232, 170, ${0.3 + power * 0.5})`;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 6]);
+    ctx.beginPath();
+    ctx.moveTo(bowX, bowY);
+    ctx.lineTo(bowX + Math.cos(ang) * len, bowY + Math.sin(ang) * len);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // small marker at finger
+    ctx.fillStyle = `rgba(255, 232, 170, ${0.7})`;
+    ctx.beginPath();
+    ctx.arc(aim.x, aim.y, 8 + power * 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawParticles() {
+    for (const p of particles) {
+      const t = p.age / p.life;
+      const alpha = 1 - t;
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = p.color;
+      ctx.shadowColor = p.glow;
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * (1 - t * 0.4), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+  }
+
+  function render() {
+    ctx.clearRect(0, 0, W, H);
+
+    let ox = 0, oy = 0;
+    if (shakeT > 0) {
+      const k = (shakeT / 80) * shakeAmp;
+      ox = (Math.random() - 0.5) * k;
+      oy = (Math.random() - 0.5) * k;
+    }
+    ctx.save();
+    ctx.translate(ox, oy);
+
+    drawStars();
+    drawBlooms();
+
+    // buds
+    for (const b of buds) {
+      if (b.hp > 0) drawBud(b);
+    }
+
+    // bow base
+    drawBow();
+    drawAim();
+
+    // arrows
+    for (const a of arrows) drawArrow(a);
+
+    // particles on top
+    drawParticles();
+
+    ctx.restore();
+  }
+
+  function loop(now) {
+    if (!running) return;
+    let dt = now - lastT;
+    if (dt > 60) dt = 60; // cap
+    lastT = now;
+    update(dt);
+    if (!running) return; // ended this frame
+    render();
+    updateHUD();
+    requestAnimationFrame(loop);
+  }
+
+  startBtn.addEventListener('click', startGame, { passive: true });
+
+  // Initial render: just stars + bow on first paint
+  setupBow();
+  initStars();
+  render();
+})();
+</script>
+</body>
+</html>
