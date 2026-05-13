@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<title>Spark Snip</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #06070d;
+    color: #e7ecff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    overflow: hidden;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  #wrap {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background:
+      radial-gradient(120% 80% at 50% 0%, #161a2b 0%, #06070d 60%, #02030a 100%);
+  }
+  #stage {
+    position: relative;
+    width: 100vw; height: 100vh;
+    max-width: 100vw; max-height: 100vh;
+    overflow: hidden;
+  }
+  canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    display: block;
+  }
+  #hud {
+    position: absolute; top: 0; left: 0; right: 0;
+    padding: max(env(safe-area-inset-top), 14px) 16px 10px;
+    display: flex; flex-direction: column; gap: 8px;
+    pointer-events: none;
+    z-index: 4;
+  }
+  .row {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 13px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #8a93b8;
+  }
+  #score { color: #e7ecff; font-weight: 600; font-variant-numeric: tabular-nums; }
+  #combo { color: #ffd166; font-weight: 600; font-variant-numeric: tabular-nums; }
+  #timer {
+    height: 4px; border-radius: 2px;
+    background: rgba(255,255,255,0.08);
+    overflow: hidden;
+  }
+  #timerFill {
+    height: 100%; width: 100%;
+    background: linear-gradient(90deg, #69f0ff, #b388ff);
+    transition: width 0.1s linear;
+  }
+  #lifeRow { display: flex; gap: 6px; }
+  .life {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, #ff7ab6, #c2185b 70%);
+    box-shadow: 0 0 8px rgba(255, 120, 180, 0.6);
+    transition: transform 0.2s, opacity 0.3s;
+  }
+  .life.gone {
+    background: radial-gradient(circle at 30% 30%, #2a2f44, #14172a 70%);
+    box-shadow: none;
+    transform: scale(0.7);
+    opacity: 0.5;
+  }
+  #targetCard {
+    align-self: center;
+    margin-top: 4px;
+    padding: 8px 16px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    backdrop-filter: blur(6px);
+    display: flex; align-items: center; gap: 10px;
+    font-size: 14px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  #targetSwatch {
+    width: 18px; height: 18px; border-radius: 50%;
+    box-shadow: 0 0 12px currentColor;
+    background: currentColor;
+    transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+  }
+  #targetLabel { font-weight: 600; }
+  #backLink {
+    position: absolute; top: max(env(safe-area-inset-top), 12px); left: 14px;
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: #cbd2f2;
+    display: flex; align-items: center; justify-content: center;
+    text-decoration: none;
+    font-size: 18px;
+    z-index: 6;
+  }
+  #overlay {
+    position: absolute; inset: 0;
+    background: rgba(6, 7, 13, 0.78);
+    backdrop-filter: blur(8px);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px;
+    padding: 24px;
+    text-align: center;
+    z-index: 10;
+    transition: opacity 0.3s;
+  }
+  #overlay.hidden { opacity: 0; pointer-events: none; }
+  #overlay h1 {
+    margin: 0;
+    font-size: 28px;
+    letter-spacing: 0.18em;
+    font-weight: 700;
+    background: linear-gradient(90deg, #69f0ff, #ffd166, #ff7ab6);
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent;
+  }
+  #overlay p {
+    margin: 0; max-width: 320px; line-height: 1.6;
+    font-size: 14px; color: #b5bdde;
+  }
+  #overlay button {
+    margin-top: 8px;
+    padding: 12px 28px;
+    border: none; border-radius: 999px;
+    background: linear-gradient(135deg, #69f0ff, #b388ff);
+    color: #06070d; font-weight: 700;
+    font-size: 14px; letter-spacing: 0.12em; text-transform: uppercase;
+    cursor: pointer;
+    box-shadow: 0 8px 24px rgba(106, 142, 255, 0.35);
+  }
+  #overlay button:active { transform: scale(0.96); }
+  #finalScore {
+    font-size: 44px; font-weight: 700; color: #e7ecff;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.05em;
+  }
+  .hint { font-size: 12px; color: #6b7299; letter-spacing: 0.08em; text-transform: uppercase; }
+  #flash {
+    position: absolute; inset: 0; pointer-events: none;
+    opacity: 0;
+    z-index: 5;
+    mix-blend-mode: screen;
+  }
+  @keyframes shake {
+    0%, 100% { transform: translate(0,0); }
+    20% { transform: translate(-6px, 2px); }
+    40% { transform: translate(5px, -3px); }
+    60% { transform: translate(-3px, 4px); }
+    80% { transform: translate(4px, 1px); }
+  }
+  .shake { animation: shake 0.36s; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="stage">
+    <a id="backLink" href="../../index.html" aria-label="戻る">←</a>
+    <canvas id="game"></canvas>
+    <div id="flash"></div>
+    <div id="hud">
+      <div class="row">
+        <span>Score <span id="score">0</span></span>
+        <span id="combo">×1</span>
+      </div>
+      <div id="timer"><div id="timerFill"></div></div>
+      <div class="row">
+        <div id="lifeRow"></div>
+        <span id="targetCard">
+          <span id="targetSwatch"></span>
+          <span id="targetLabel">CUT</span>
+        </span>
+      </div>
+    </div>
+
+    <div id="overlay">
+      <div class="hint">Spark Snip</div>
+      <h1 id="title">SNIP THE LIVE WIRE</h1>
+      <p id="desc">指定された色のワイヤーを<strong>指でスワイプして切る</strong>。<br/>違う色を切ると爆発。色は時々入れ替わる。</p>
+      <button id="startBtn">START</button>
+      <div class="hint">60 SECONDS · 3 LIVES</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const stage = document.getElementById('stage');
+  const overlay = document.getElementById('overlay');
+  const startBtn = document.getElementById('startBtn');
+  const scoreEl = document.getElementById('score');
+  const comboEl = document.getElementById('combo');
+  const timerFill = document.getElementById('timerFill');
+  const lifeRow = document.getElementById('lifeRow');
+  const targetSwatch = document.getElementById('targetSwatch');
+  const targetLabel = document.getElementById('targetLabel');
+  const titleEl = document.getElementById('title');
+  const descEl = document.getElementById('desc');
+  const flash = document.getElementById('flash');
+
+  // -- Colors / wire palette ---------------------------------------------
+  const PALETTE = [
+    { id: 'r', name: 'RED',    hex: '#ff5470' },
+    { id: 'c', name: 'CYAN',   hex: '#69f0ff' },
+    { id: 'y', name: 'GOLD',   hex: '#ffd166' },
+    { id: 'g', name: 'LIME',   hex: '#9bff8a' },
+    { id: 'v', name: 'VIOLET', hex: '#b388ff' },
+  ];
+
+  let W = 0, H = 0, DPR = 1;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    const rect = stage.getBoundingClientRect();
+    W = rect.width; H = rect.height;
+    canvas.width = Math.round(W * DPR);
+    canvas.height = Math.round(H * DPR);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // -- Game state --------------------------------------------------------
+  let wires = [];
+  let sparks = [];
+  let trail = [];
+  let particles = [];
+  let score = 0;
+  let combo = 1;
+  let lives = 3;
+  let target = PALETTE[0];
+  let timeLeft = 60;
+  let running = false;
+  let lastTime = 0;
+  let targetSwapTimer = 0;
+  let wireSpeed = 0.6;
+  let nextSpawn = 0;
+  let elapsed = 0;
+
+  // -- Wire class --------------------------------------------------------
+  let wireId = 0;
+  function spawnWire() {
+    const palette = PALETTE.slice();
+    const color = palette[Math.floor(Math.random() * palette.length)];
+    const margin = 30;
+    // Random straight wire across the field at varied angles.
+    const fromSide = Math.random() < 0.5 ? 'left' : 'top';
+    let x1, y1, x2, y2;
+    const usableTop = H * 0.18;
+    const usableBottom = H * 0.92;
+    if (fromSide === 'left') {
+      x1 = -margin;
+      x2 = W + margin;
+      y1 = usableTop + Math.random() * (usableBottom - usableTop);
+      const tilt = (Math.random() - 0.5) * (H * 0.22);
+      y2 = Math.max(usableTop, Math.min(usableBottom, y1 + tilt));
+    } else {
+      // diagonal from top to bottom for some variety
+      x1 = W * (0.1 + Math.random() * 0.8);
+      x2 = W * (0.1 + Math.random() * 0.8);
+      y1 = usableTop - margin;
+      y2 = usableBottom + margin;
+    }
+    wires.push({
+      id: wireId++,
+      color,
+      x1, y1, x2, y2,
+      phase: Math.random() * Math.PI * 2,
+      amp: 4 + Math.random() * 6,
+      freq: 1.2 + Math.random() * 1.6,
+      life: 0,
+      maxLife: 6.5 + Math.random() * 2.5,
+      cut: false,
+      cutFx: 0,
+      cutPoint: null,
+      cutWrong: false,
+    });
+  }
+
+  function setTarget(next) {
+    target = next || PALETTE[Math.floor(Math.random() * PALETTE.length)];
+    targetSwatch.style.color = target.hex;
+    targetLabel.textContent = 'CUT  ' + target.name;
+  }
+
+  function renderLives() {
+    lifeRow.innerHTML = '';
+    for (let i = 0; i < 3; i++) {
+      const d = document.createElement('div');
+      d.className = 'life' + (i >= lives ? ' gone' : '');
+      lifeRow.appendChild(d);
+    }
+  }
+
+  function reset() {
+    wires = []; sparks = []; trail = []; particles = [];
+    score = 0; combo = 1; lives = 3;
+    timeLeft = 60;
+    targetSwapTimer = 4 + Math.random() * 3;
+    wireSpeed = 0.6;
+    nextSpawn = 0;
+    elapsed = 0;
+    scoreEl.textContent = '0';
+    comboEl.textContent = '×1';
+    timerFill.style.width = '100%';
+    renderLives();
+    setTarget(PALETTE[Math.floor(Math.random() * PALETTE.length)]);
+    // initial wires
+    for (let i = 0; i < 4; i++) spawnWire();
+  }
+
+  // -- Input -------------------------------------------------------------
+  let activePointer = null;
+
+  function getPoint(ev) {
+    const rect = canvas.getBoundingClientRect();
+    let cx, cy;
+    if (ev.touches && ev.touches[0]) {
+      cx = ev.touches[0].clientX; cy = ev.touches[0].clientY;
+    } else if (ev.changedTouches && ev.changedTouches[0]) {
+      cx = ev.changedTouches[0].clientX; cy = ev.changedTouches[0].clientY;
+    } else {
+      cx = ev.clientX; cy = ev.clientY;
+    }
+    return { x: cx - rect.left, y: cy - rect.top };
+  }
+
+  function startStroke(ev) {
+    if (!running) return;
+    ev.preventDefault();
+    activePointer = true;
+    trail = [];
+    const p = getPoint(ev);
+    trail.push({ x: p.x, y: p.y, t: performance.now() });
+  }
+
+  function moveStroke(ev) {
+    if (!running || !activePointer) return;
+    ev.preventDefault();
+    const p = getPoint(ev);
+    const last = trail[trail.length - 1];
+    if (last) {
+      const dx = p.x - last.x, dy = p.y - last.y;
+      if (dx * dx + dy * dy < 4) return; // skip tiny moves
+      // segment from last to current — check intersections with wires.
+      checkCut(last.x, last.y, p.x, p.y);
+    }
+    trail.push({ x: p.x, y: p.y, t: performance.now() });
+    if (trail.length > 40) trail.shift();
+  }
+
+  function endStroke(ev) {
+    if (!running) return;
+    activePointer = false;
+    // fade out trail naturally in render loop
+  }
+
+  canvas.addEventListener('touchstart', startStroke, { passive: false });
+  canvas.addEventListener('touchmove', moveStroke, { passive: false });
+  canvas.addEventListener('touchend', endStroke, { passive: false });
+  canvas.addEventListener('touchcancel', endStroke, { passive: false });
+  canvas.addEventListener('mousedown', startStroke);
+  canvas.addEventListener('mousemove', moveStroke);
+  canvas.addEventListener('mouseup', endStroke);
+  canvas.addEventListener('mouseleave', endStroke);
+
+  // -- Geometry ----------------------------------------------------------
+  function segIntersect(p1, p2, p3, p4) {
+    const x1=p1.x, y1=p1.y, x2=p2.x, y2=p2.y;
+    const x3=p3.x, y3=p3.y, x4=p4.x, y4=p4.y;
+    const d = (x1-x2)*(y3-y4) - (y1-y2)*(x3-x4);
+    if (Math.abs(d) < 1e-6) return null;
+    const t = ((x1-x3)*(y3-y4) - (y1-y3)*(x3-x4)) / d;
+    const u = ((x1-x3)*(y1-y2) - (y1-y3)*(x1-x2)) / d;
+    if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+    return { x: x1 + t * (x2 - x1), y: y1 + t * (y2 - y1) };
+  }
+
+  // Wire visible point at param u along the line (with sin perturbation).
+  function wirePoint(w, u, time) {
+    const dx = w.x2 - w.x1, dy = w.y2 - w.y1;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len, ny = dx / len;
+    const wobble = Math.sin(u * Math.PI * w.freq + w.phase + time * 1.6) * w.amp * Math.sin(u * Math.PI);
+    return {
+      x: w.x1 + dx * u + nx * wobble,
+      y: w.y1 + dy * u + ny * wobble,
+    };
+  }
+
+  function checkCut(ax, ay, bx, by) {
+    const a = { x: ax, y: ay }, b = { x: bx, y: by };
+    for (const w of wires) {
+      if (w.cut) continue;
+      // sample wire as polyline
+      const SAMPLES = 14;
+      let prev = wirePoint(w, 0, elapsed);
+      for (let i = 1; i <= SAMPLES; i++) {
+        const cur = wirePoint(w, i / SAMPLES, elapsed);
+        const hit = segIntersect(a, b, prev, cur);
+        if (hit) {
+          onCut(w, hit);
+          break;
+        }
+        prev = cur;
+      }
+    }
+  }
+
+  // -- Cut handling ------------------------------------------------------
+  function onCut(w, point) {
+    w.cut = true;
+    w.cutFx = 1;
+    w.cutPoint = point;
+    const correct = w.color.id === target.id;
+    w.cutWrong = !correct;
+    if (correct) {
+      const gain = 10 * combo;
+      score += gain;
+      combo = Math.min(combo + 1, 9);
+      scoreEl.textContent = String(score);
+      comboEl.textContent = '×' + combo;
+      spawnSparks(point.x, point.y, w.color.hex, 22, 1);
+      flashScreen(w.color.hex, 0.18);
+      vibrate(12);
+      // chance to swap target color on success cluster
+      if (combo % 3 === 0) {
+        // pick a different one
+        const others = PALETTE.filter(p => p.id !== target.id);
+        setTarget(others[Math.floor(Math.random() * others.length)]);
+        targetSwapTimer = 5 + Math.random() * 3;
+      }
+    } else {
+      lives--;
+      combo = 1;
+      comboEl.textContent = '×1';
+      spawnSparks(point.x, point.y, '#ff3a55', 50, 2.2);
+      flashScreen('#ff3a55', 0.5);
+      shake();
+      vibrate([30, 40, 30]);
+      renderLives();
+      if (lives <= 0) {
+        endGame();
+      }
+    }
+  }
+
+  // -- FX ----------------------------------------------------------------
+  function spawnSparks(x, y, color, count, scale) {
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = (1 + Math.random() * 3) * scale;
+      particles.push({
+        x, y,
+        vx: Math.cos(a) * s * 60,
+        vy: Math.sin(a) * s * 60 - 20,
+        life: 0.4 + Math.random() * 0.5,
+        age: 0,
+        color,
+        size: 1.5 + Math.random() * 2,
+      });
+    }
+  }
+
+  function flashScreen(color, alpha) {
+    flash.style.background = color;
+    flash.style.opacity = alpha;
+    flash.style.transition = 'opacity 0s';
+    requestAnimationFrame(() => {
+      flash.style.transition = 'opacity 0.35s ease-out';
+      flash.style.opacity = 0;
+    });
+  }
+
+  function shake() {
+    stage.classList.remove('shake');
+    void stage.offsetWidth;
+    stage.classList.add('shake');
+  }
+
+  function vibrate(p) {
+    if (navigator.vibrate) try { navigator.vibrate(p); } catch (e) {}
+  }
+
+  // -- Game loop ---------------------------------------------------------
+  function tick(now) {
+    if (!running) return;
+    const dt = Math.min(0.05, (now - lastTime) / 1000 || 0);
+    lastTime = now;
+    elapsed += dt;
+
+    timeLeft -= dt;
+    if (timeLeft <= 0) {
+      timeLeft = 0;
+      timerFill.style.width = '0%';
+      endGame();
+      return;
+    }
+    timerFill.style.width = (timeLeft / 60 * 100) + '%';
+
+    // periodic target swap
+    targetSwapTimer -= dt;
+    if (targetSwapTimer <= 0) {
+      const others = PALETTE.filter(p => p.id !== target.id);
+      setTarget(others[Math.floor(Math.random() * others.length)]);
+      targetSwapTimer = 4 + Math.random() * 4;
+      // flash card briefly
+      targetSwatch.style.boxShadow = '0 0 24px ' + target.hex;
+      setTimeout(() => { targetSwatch.style.boxShadow = '0 0 12px ' + target.hex; }, 250);
+    }
+
+    // spawn rhythm
+    nextSpawn -= dt;
+    const wantCount = Math.min(7, 4 + Math.floor((60 - timeLeft) / 12));
+    const aliveCount = wires.filter(w => !w.cut && w.life < w.maxLife).length;
+    if (nextSpawn <= 0 && aliveCount < wantCount) {
+      spawnWire();
+      nextSpawn = 0.4 + Math.random() * 0.6;
+    }
+
+    // update wires
+    for (const w of wires) {
+      w.life += dt;
+      if (w.cut) {
+        w.cutFx = Math.max(0, w.cutFx - dt * 1.6);
+      }
+    }
+    wires = wires.filter(w => {
+      if (w.cut && w.cutFx <= 0) return false;
+      if (!w.cut && w.life > w.maxLife) return false; // wire expires un-cut
+      return true;
+    });
+
+    // update particles
+    for (const p of particles) {
+      p.age += dt;
+      p.vy += 220 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= 0.96;
+    }
+    particles = particles.filter(p => p.age < p.life);
+
+    // fade trail
+    const cutoff = performance.now() - 250;
+    while (trail.length && trail[0].t < cutoff) trail.shift();
+
+    draw();
+    requestAnimationFrame(tick);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    // subtle grid / ambient glow
+    drawAmbient();
+
+    // wires
+    const now = performance.now();
+    for (const w of wires) {
+      drawWire(w, now / 1000);
+    }
+
+    // particles
+    for (const p of particles) {
+      const a = 1 - (p.age / p.life);
+      ctx.globalAlpha = Math.max(0, a);
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * (0.6 + a * 0.8), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // trail
+    if (trail.length > 1) {
+      ctx.lineCap = 'round';
+      for (let i = 1; i < trail.length; i++) {
+        const a = i / trail.length;
+        ctx.strokeStyle = 'rgba(231, 236, 255,' + (a * 0.6) + ')';
+        ctx.lineWidth = 2 + a * 4;
+        ctx.beginPath();
+        ctx.moveTo(trail[i - 1].x, trail[i - 1].y);
+        ctx.lineTo(trail[i].x, trail[i].y);
+        ctx.stroke();
+      }
+    }
+  }
+
+  function drawAmbient() {
+    // faint vignette wires of "circuit board" feel
+    ctx.save();
+    ctx.globalAlpha = 0.18;
+    ctx.strokeStyle = '#1a2148';
+    ctx.lineWidth = 1;
+    const step = 36;
+    for (let y = step; y < H; y += step) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(W, y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawWire(w, time) {
+    const segs = 28;
+    const hex = w.color.hex;
+    const isTarget = w.color.id === target.id;
+    // outer glow
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    if (!w.cut) {
+      const pulse = 0.55 + 0.45 * Math.sin(time * 2.4 + w.phase);
+      // ghost glow
+      ctx.shadowBlur = isTarget ? 18 + pulse * 8 : 6;
+      ctx.shadowColor = hex;
+      ctx.strokeStyle = isTarget
+        ? hex
+        : hexAlpha(hex, 0.65);
+      ctx.lineWidth = isTarget ? 5 + pulse * 1.5 : 4;
+      tracePolyline(w, segs, time);
+      ctx.stroke();
+
+      // inner bright core
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = isTarget ? '#ffffff' : hexAlpha('#ffffff', 0.6);
+      ctx.lineWidth = isTarget ? 1.6 : 1.2;
+      tracePolyline(w, segs, time);
+      ctx.stroke();
+
+      // endpoint connectors
+      const a0 = wirePoint(w, 0, time);
+      const a1 = wirePoint(w, 1, time);
+      ctx.fillStyle = hex;
+      ctx.shadowColor = hex;
+      ctx.shadowBlur = 8;
+      ctx.beginPath(); ctx.arc(a0.x, a0.y, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(a1.x, a1.y, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
+    } else {
+      // cut wire: draw two halves retracting from cutPoint
+      const cp = w.cutPoint;
+      const retract = (1 - w.cutFx) * 18;
+      ctx.shadowBlur = 4;
+      ctx.shadowColor = hex;
+      ctx.strokeStyle = hexAlpha(hex, Math.max(0.2, w.cutFx));
+      ctx.lineWidth = 3.5;
+      drawHalfWire(w, cp, time, -retract, 0); // start side
+      ctx.stroke();
+      drawHalfWire(w, cp, time, retract, 1); // end side
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // residual fizz at cut point
+      if (Math.random() < 0.4 && w.cutFx > 0.2) {
+        spawnSparks(cp.x + (Math.random()-0.5)*4, cp.y + (Math.random()-0.5)*4,
+                    w.cutWrong ? '#ff3a55' : hex, 2, 0.6);
+      }
+    }
+  }
+
+  function tracePolyline(w, segs, time) {
+    ctx.beginPath();
+    for (let i = 0; i <= segs; i++) {
+      const u = i / segs;
+      const p = wirePoint(w, u, time);
+      if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+    }
+  }
+
+  function drawHalfWire(w, cp, time, offset, side) {
+    // side 0: from u=0 toward cut; side 1: from cut toward u=1
+    const segs = 14;
+    ctx.beginPath();
+    if (side === 0) {
+      // approximate: trace from start to a point slightly before cp (using a fade param)
+      for (let i = 0; i <= segs; i++) {
+        const u = (i / segs) * 0.48;
+        const p = wirePoint(w, u, time);
+        if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+      }
+      // pull toward cut point with offset
+      const endU = 0.49;
+      const ep = wirePoint(w, endU, time);
+      const dx = cp.x - ep.x, dy = cp.y - ep.y;
+      const len = Math.hypot(dx, dy) || 1;
+      ctx.lineTo(ep.x + (dx / len) * Math.max(0, len - 8 - offset),
+                 ep.y + (dy / len) * Math.max(0, len - 8 - offset));
+    } else {
+      const startU = 0.51;
+      const sp = wirePoint(w, startU, time);
+      const dx = sp.x - cp.x, dy = sp.y - cp.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const sx = sp.x - (dx / len) * Math.max(0, len - 8 - offset);
+      const sy = sp.y - (dy / len) * Math.max(0, len - 8 - offset);
+      ctx.moveTo(sx, sy);
+      for (let i = 1; i <= segs; i++) {
+        const u = 0.52 + (i / segs) * 0.48;
+        const p = wirePoint(w, u, time);
+        ctx.lineTo(p.x, p.y);
+      }
+    }
+  }
+
+  function hexAlpha(hex, a) {
+    const h = hex.replace('#', '');
+    const r = parseInt(h.substring(0, 2), 16);
+    const g = parseInt(h.substring(2, 4), 16);
+    const b = parseInt(h.substring(4, 6), 16);
+    return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+  }
+
+  // -- Game control ------------------------------------------------------
+  function startGame() {
+    reset();
+    overlay.classList.add('hidden');
+    running = true;
+    lastTime = performance.now();
+    requestAnimationFrame(tick);
+  }
+
+  function endGame() {
+    running = false;
+    titleEl.textContent = 'WIRE SEVERED';
+    descEl.innerHTML = '<span id="finalScore">' + score + '</span><br/><span class="hint">FINAL SCORE</span>';
+    startBtn.textContent = 'RETRY';
+    overlay.classList.remove('hidden');
+    vibrate(60);
+  }
+
+  startBtn.addEventListener('click', startGame);
+
+  // Auto-resize wires when window resizes mid-game
+  window.addEventListener('orientationchange', () => setTimeout(resize, 100));
+})();
+</script>
+</body>
+</html>
