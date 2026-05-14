@@ -1,0 +1,8 @@
+{
+  "title": "Plumb",
+  "date": "2026-05-14",
+  "description": "天井から吊るした重りを指で揺らし、降ってくる宝石にぶつけて回収する振り子アクション。急に指を動かすと振り子は大きく振れるが制御も難しくなる──赤い爆弾は慎重に避けて。",
+  "tags": ["swing", "pendulum", "physics", "drag", "collect"],
+  "rating": null,
+  "notes": ""
+}
