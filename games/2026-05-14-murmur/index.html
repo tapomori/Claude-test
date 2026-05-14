@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#050814">
+<title>Murmur</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: #050814; touch-action: none;
+    user-select: none; -webkit-user-select: none;
+    overscroll-behavior: none;
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    color: #d9e6ff;
+  }
+  #cv { display: block; position: fixed; inset: 0; width: 100%; height: 100%; }
+
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0;
+    display: flex; justify-content: space-between;
+    padding: 18px 22px; pointer-events: none;
+    z-index: 10;
+  }
+  #hud .group { display: flex; flex-direction: column; }
+  #hud .group.right { align-items: flex-end; }
+  #hud .label {
+    font-size: 9px; opacity: 0.55;
+    letter-spacing: 0.35em; text-transform: uppercase;
+  }
+  #hud .val {
+    font-size: 26px; font-weight: 200;
+    color: #fff; letter-spacing: 0.05em;
+    text-shadow: 0 0 14px rgba(140,180,255,0.4);
+    margin-top: 2px;
+  }
+
+  #flockBar {
+    position: fixed; left: 24px; right: 24px; bottom: 28px;
+    height: 3px; background: rgba(120,160,220,0.12);
+    border-radius: 2px; overflow: hidden; pointer-events: none;
+    z-index: 10;
+  }
+  #flockFill {
+    height: 100%; width: 100%;
+    background: linear-gradient(90deg, #ffe0a8, #ff9d6a);
+    transition: width 0.25s, background 0.4s;
+    box-shadow: 0 0 12px rgba(255,200,140,0.6);
+  }
+  #flockBar.low #flockFill {
+    background: linear-gradient(90deg, #ff6a6a, #ff3a4a);
+    box-shadow: 0 0 12px rgba(255,80,90,0.7);
+  }
+
+  #back {
+    position: fixed; top: 16px; left: 50%;
+    transform: translateX(-50%);
+    color: rgba(217,230,255,0.45);
+    text-decoration: none; font-size: 10px;
+    letter-spacing: 0.3em; padding: 6px 14px;
+    border: 1px solid rgba(120,160,220,0.18);
+    border-radius: 3px; z-index: 50;
+    background: rgba(5,8,20,0.4);
+    backdrop-filter: blur(6px);
+  }
+  #back:active { background: rgba(120,160,220,0.15); }
+
+  #overlay {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at center, rgba(20,28,55,0.85), rgba(5,8,20,0.95));
+    backdrop-filter: blur(10px);
+    z-index: 30; transition: opacity 0.5s;
+    padding: 20px;
+  }
+  #overlay.hidden { opacity: 0; pointer-events: none; }
+  #overlay h1 {
+    font-size: 48px; font-weight: 100;
+    letter-spacing: 0.35em; margin-bottom: 6px;
+    color: #ffd9b0;
+    text-shadow: 0 0 28px rgba(255,180,120,0.5);
+  }
+  #overlay .sub {
+    font-size: 10px; opacity: 0.5;
+    letter-spacing: 0.4em; text-transform: uppercase;
+    margin-bottom: 32px;
+  }
+  #overlay p {
+    font-size: 13px; opacity: 0.75;
+    margin-bottom: 36px; text-align: center;
+    max-width: 280px; line-height: 1.85;
+    letter-spacing: 0.04em;
+  }
+  #overlay .score {
+    font-size: 72px; font-weight: 100;
+    color: #fff; margin: 12px 0 4px;
+    text-shadow: 0 0 32px rgba(140,200,255,0.4);
+  }
+  #overlay .scoreLabel {
+    font-size: 10px; opacity: 0.5;
+    letter-spacing: 0.4em; text-transform: uppercase;
+    margin-bottom: 26px;
+  }
+  #overlay button {
+    background: transparent;
+    border: 1px solid rgba(255,200,140,0.45);
+    color: #ffd9b0; padding: 14px 38px;
+    font-size: 12px; letter-spacing: 0.4em;
+    text-transform: uppercase; cursor: pointer;
+    border-radius: 2px;
+    font-family: inherit;
+    transition: background 0.2s, border-color 0.2s;
+  }
+  #overlay button:active {
+    background: rgba(255,200,140,0.12);
+    border-color: rgba(255,200,140,0.8);
+  }
+
+  .hint {
+    position: fixed; left: 50%; bottom: 60px;
+    transform: translateX(-50%);
+    font-size: 11px; opacity: 0;
+    letter-spacing: 0.3em; text-transform: uppercase;
+    color: rgba(217,230,255,0.5);
+    pointer-events: none; z-index: 8;
+    transition: opacity 0.6s;
+  }
+  .hint.show { opacity: 1; }
+</style>
+</head>
+<body>
+<a href="../../index.html" id="back">＜ GALLERY</a>
+<canvas id="cv"></canvas>
+<div id="hud">
+  <div class="group">
+    <div class="label">Seeds</div>
+    <div class="val" id="score">0</div>
+  </div>
+  <div class="group right">
+    <div class="label">Time</div>
+    <div class="val" id="time">60</div>
+  </div>
+</div>
+<div id="flockBar"><div id="flockFill"></div></div>
+<div class="hint" id="hint">指で群れを連れ歩く</div>
+<div id="overlay">
+  <h1>MURMUR</h1>
+  <div class="sub">— lead the flock —</div>
+  <p>指で群れを導いて<br>青いシードを集める。<br>赤い火種にぶつかると群れが散る。</p>
+  <button id="startBtn">START</button>
+</div>
+
+<script>
+(() => {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  let W = 0, H = 0, DPR = 1;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    cv.width = Math.floor(W * DPR);
+    cv.height = Math.floor(H * DPR);
+    cv.style.width = W + 'px';
+    cv.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // Star field background (precomputed)
+  const stars = [];
+  for (let i = 0; i < 80; i++) {
+    stars.push({
+      x: Math.random(),
+      y: Math.random(),
+      r: Math.random() * 1.2 + 0.3,
+      a: Math.random() * 0.5 + 0.15,
+      tw: Math.random() * Math.PI * 2,
+    });
+  }
+
+  const state = {
+    running: false,
+    flock: [],
+    seeds: [],
+    embers: [],
+    particles: [],
+    ripples: [],
+    score: 0,
+    time: 60,
+    flockHealth: 60,
+    flockMax: 60,
+    targetFlock: 32,
+    finger: { x: 0, y: 0, active: false, lastX: 0, lastY: 0, vx: 0, vy: 0 },
+    lastT: 0,
+    seedTimer: 0,
+    emberTimer: 2.5,
+    elapsed: 0,
+  };
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+
+  class Bird {
+    constructor(x, y) {
+      this.x = x !== undefined ? x : W/2 + rand(-50, 50);
+      this.y = y !== undefined ? y : H/2 + rand(-50, 50);
+      this.vx = rand(-30, 30);
+      this.vy = rand(-30, 30);
+      this.heading = 0;
+      this.flap = Math.random() * Math.PI * 2;
+      this.size = rand(2.4, 3.2);
+    }
+    update(dt) {
+      const f = state.finger;
+      const dx = f.x - this.x;
+      const dy = f.y - this.y;
+      const dist = Math.hypot(dx, dy) + 0.001;
+      // Spring attraction with mild distance falloff
+      const k = f.active ? 7.0 : 2.0;
+      this.vx += (dx / dist) * Math.min(dist, 280) * k * dt;
+      this.vy += (dy / dist) * Math.min(dist, 280) * k * dt;
+      // Wandering noise (creates flock spread)
+      const noise = 50;
+      this.vx += (Math.random() - 0.5) * noise * dt * 6;
+      this.vy += (Math.random() - 0.5) * noise * dt * 6;
+      // Damping
+      this.vx *= 0.93;
+      this.vy *= 0.93;
+      // Cap speed
+      const sp = Math.hypot(this.vx, this.vy);
+      const maxSp = 720;
+      if (sp > maxSp) { this.vx *= maxSp/sp; this.vy *= maxSp/sp; }
+      this.x += this.vx * dt;
+      this.y += this.vy * dt;
+      // Soft wrap from edges (push back)
+      const margin = 20;
+      if (this.x < margin) this.vx += 200 * dt;
+      if (this.x > W - margin) this.vx -= 200 * dt;
+      if (this.y < margin) this.vy += 200 * dt;
+      if (this.y > H - margin) this.vy -= 200 * dt;
+      if (sp > 30) this.heading = Math.atan2(this.vy, this.vx);
+      this.flap += dt * (8 + sp * 0.02);
+    }
+    draw() {
+      const flapY = Math.sin(this.flap) * 1.4;
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      ctx.rotate(this.heading);
+      ctx.fillStyle = '#ffe6b8';
+      ctx.shadowColor = 'rgba(255,200,140,0.8)';
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      ctx.moveTo(this.size * 1.8, 0);
+      ctx.lineTo(-this.size, this.size + flapY);
+      ctx.lineTo(-this.size * 0.5, 0);
+      ctx.lineTo(-this.size, -this.size - flapY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  function adjustFlockSize() {
+    const target = Math.max(0, Math.round(state.flockHealth / state.flockMax * state.targetFlock));
+    while (state.flock.length > target) state.flock.pop();
+    while (state.flock.length < target) {
+      state.flock.push(new Bird(state.finger.x + rand(-60, 60), state.finger.y + rand(-60, 60)));
+    }
+  }
+
+  function spawnSeed() {
+    const m = 70;
+    state.seeds.push({
+      x: rand(m, W - m),
+      y: rand(m + 60, H - m - 60),
+      r: 14,
+      phase: Math.random() * Math.PI * 2,
+      life: 1,
+      age: 0,
+    });
+  }
+
+  function spawnEmber() {
+    const edge = Math.floor(Math.random() * 4);
+    let x, y, vx, vy;
+    const baseSp = 55 + Math.min(state.elapsed * 0.8, 50);
+    const sp = baseSp + rand(-10, 25);
+    if (edge === 0) { x = -25; y = rand(80, H - 100); vx = sp; vy = rand(-25, 25); }
+    else if (edge === 1) { x = W + 25; y = rand(80, H - 100); vx = -sp; vy = rand(-25, 25); }
+    else if (edge === 2) { x = rand(60, W - 60); y = -25; vx = rand(-25, 25); vy = sp; }
+    else { x = rand(60, W - 60); y = H + 25; vx = rand(-25, 25); vy = -sp; }
+    state.embers.push({ x, y, vx, vy, r: 12, phase: Math.random() * Math.PI * 2, age: 0 });
+  }
+
+  function start() {
+    state.running = true;
+    state.flock = [];
+    state.finger.x = W / 2;
+    state.finger.y = H / 2;
+    state.finger.lastX = state.finger.x;
+    state.finger.lastY = state.finger.y;
+    state.finger.active = false;
+    for (let i = 0; i < state.targetFlock; i++) {
+      state.flock.push(new Bird(W/2 + rand(-50, 50), H/2 + rand(-50, 50)));
+    }
+    state.flockHealth = state.flockMax;
+    state.seeds = [];
+    state.embers = [];
+    state.particles = [];
+    state.ripples = [];
+    state.score = 0;
+    state.time = 60;
+    state.elapsed = 0;
+    state.seedTimer = 0;
+    state.emberTimer = 3.5;
+    document.getElementById('score').textContent = '0';
+    document.getElementById('time').textContent = '60';
+    document.getElementById('flockBar').classList.remove('low');
+    document.getElementById('flockFill').style.width = '100%';
+    document.getElementById('overlay').classList.add('hidden');
+    const hint = document.getElementById('hint');
+    hint.classList.add('show');
+    setTimeout(() => hint.classList.remove('show'), 2400);
+    for (let i = 0; i < 3; i++) spawnSeed();
+    state.lastT = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  function gameOver(reason) {
+    state.running = false;
+    const ov = document.getElementById('overlay');
+    const title = reason === 'time' ? 'DAWN' : 'SCATTERED';
+    const msg = reason === 'time'
+      ? '夜明けまで群れを保った'
+      : '群れが散ってしまった';
+    ov.innerHTML = `
+      <h1>${title}</h1>
+      <div class="sub">— ${reason === 'time' ? 'sunrise' : 'broken'} —</div>
+      <div class="score">${state.score}</div>
+      <div class="scoreLabel">Seeds Gathered</div>
+      <p>${msg}</p>
+      <button id="startBtn">AGAIN</button>
+    `;
+    ov.classList.remove('hidden');
+    document.getElementById('startBtn').addEventListener('click', start);
+    if (navigator.vibrate) navigator.vibrate([30, 60, 30]);
+  }
+
+  function loop(t) {
+    if (!state.running) return;
+    let dt = (t - state.lastT) / 1000;
+    state.lastT = t;
+    if (dt > 0.05) dt = 0.05;
+
+    state.elapsed += dt;
+    state.time -= dt;
+    if (state.time <= 0) { gameOver('time'); return; }
+    document.getElementById('time').textContent = Math.max(0, Math.ceil(state.time));
+
+    // Spawns
+    state.seedTimer -= dt;
+    if (state.seedTimer <= 0 && state.seeds.length < 4) {
+      spawnSeed();
+      state.seedTimer = rand(1.6, 3.0);
+    }
+    state.emberTimer -= dt;
+    if (state.emberTimer <= 0 && state.embers.length < 5) {
+      spawnEmber();
+      const rate = Math.max(0.7, 2.4 - state.elapsed * 0.02);
+      state.emberTimer = rand(rate * 0.7, rate * 1.4);
+    }
+
+    // Finger velocity tracking
+    state.finger.vx = state.finger.x - state.finger.lastX;
+    state.finger.vy = state.finger.y - state.finger.lastY;
+    state.finger.lastX = state.finger.x;
+    state.finger.lastY = state.finger.y;
+
+    // Update flock
+    for (const b of state.flock) b.update(dt);
+
+    // Seed collection
+    for (let i = state.seeds.length - 1; i >= 0; i--) {
+      const s = state.seeds[i];
+      s.phase += dt * 2.6;
+      s.age += dt;
+      let hit = false;
+      for (const b of state.flock) {
+        if (Math.hypot(b.x - s.x, b.y - s.y) < s.r + 4) { hit = true; break; }
+      }
+      if (hit) {
+        state.score++;
+        document.getElementById('score').textContent = state.score;
+        for (let j = 0; j < 16; j++) {
+          const ang = (j / 16) * Math.PI * 2 + Math.random() * 0.3;
+          state.particles.push({
+            x: s.x, y: s.y,
+            vx: Math.cos(ang) * rand(80, 220),
+            vy: Math.sin(ang) * rand(80, 220),
+            life: 1, color: '160,220,255', size: rand(1.5, 3),
+          });
+        }
+        state.ripples.push({ x: s.x, y: s.y, r: 10, life: 1, color: '160,220,255' });
+        state.flockHealth = Math.min(state.flockMax, state.flockHealth + 2);
+        adjustFlockSize();
+        state.seeds.splice(i, 1);
+        if (navigator.vibrate) navigator.vibrate(12);
+      }
+    }
+
+    // Ember update + collision
+    for (let i = state.embers.length - 1; i >= 0; i--) {
+      const e = state.embers[i];
+      e.x += e.vx * dt;
+      e.y += e.vy * dt;
+      e.phase += dt * 4;
+      e.age += dt;
+      if (e.age > 14 || e.x < -60 || e.x > W + 60 || e.y < -60 || e.y > H + 60) {
+        state.embers.splice(i, 1);
+        continue;
+      }
+      let hitCount = 0;
+      for (const b of state.flock) {
+        if (Math.hypot(b.x - e.x, b.y - e.y) < e.r + 5) hitCount++;
+      }
+      if (hitCount > 0) {
+        state.flockHealth -= 6 + Math.min(hitCount, 4);
+        for (let j = 0; j < 18; j++) {
+          const ang = (j / 18) * Math.PI * 2 + Math.random() * 0.4;
+          state.particles.push({
+            x: e.x, y: e.y,
+            vx: Math.cos(ang) * rand(120, 280),
+            vy: Math.sin(ang) * rand(120, 280),
+            life: 0.9, color: '255,130,90', size: rand(1.5, 3.5),
+          });
+        }
+        state.ripples.push({ x: e.x, y: e.y, r: 12, life: 1, color: '255,130,90' });
+        if (navigator.vibrate) navigator.vibrate(34);
+        state.embers.splice(i, 1);
+        adjustFlockSize();
+        if (state.flockHealth <= 0) { gameOver('scatter'); return; }
+      }
+    }
+
+    // Particles
+    for (let i = state.particles.length - 1; i >= 0; i--) {
+      const p = state.particles[i];
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= 0.93; p.vy *= 0.93;
+      p.life -= dt * 1.5;
+      if (p.life <= 0) state.particles.splice(i, 1);
+    }
+
+    // Ripples
+    for (let i = state.ripples.length - 1; i >= 0; i--) {
+      const r = state.ripples[i];
+      r.r += dt * 220;
+      r.life -= dt * 1.4;
+      if (r.life <= 0) state.ripples.splice(i, 1);
+    }
+
+    // HUD bar
+    const ratio = state.flockHealth / state.flockMax;
+    document.getElementById('flockFill').style.width = (ratio * 100) + '%';
+    document.getElementById('flockBar').classList.toggle('low', ratio < 0.35);
+
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  function render() {
+    // Background
+    ctx.fillStyle = '#050814';
+    ctx.fillRect(0, 0, W, H);
+    // Subtle vignette
+    const vg = ctx.createRadialGradient(W/2, H/2, Math.min(W, H) * 0.3, W/2, H/2, Math.max(W, H) * 0.75);
+    vg.addColorStop(0, 'rgba(20,30,60,0.3)');
+    vg.addColorStop(1, 'rgba(0,0,0,0.55)');
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, W, H);
+    // Stars
+    for (const s of stars) {
+      s.tw += 0.01;
+      const a = s.a * (0.7 + 0.3 * Math.sin(s.tw));
+      ctx.fillStyle = `rgba(200,220,255,${a})`;
+      ctx.beginPath();
+      ctx.arc(s.x * W, s.y * H, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Finger glow
+    if (state.finger.active) {
+      const fg = ctx.createRadialGradient(state.finger.x, state.finger.y, 0, state.finger.x, state.finger.y, 140);
+      fg.addColorStop(0, 'rgba(255,210,150,0.12)');
+      fg.addColorStop(1, 'rgba(255,210,150,0)');
+      ctx.fillStyle = fg;
+      ctx.fillRect(0, 0, W, H);
+      // Finger ring
+      ctx.strokeStyle = 'rgba(255,220,170,0.25)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(state.finger.x, state.finger.y, 16, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Ripples
+    for (const r of state.ripples) {
+      ctx.strokeStyle = `rgba(${r.color},${r.life * 0.5})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Seeds
+    for (const s of state.seeds) {
+      const pulse = 1 + Math.sin(s.phase) * 0.18;
+      const ig = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, 38 * pulse);
+      ig.addColorStop(0, 'rgba(150,220,255,0.55)');
+      ig.addColorStop(0.4, 'rgba(80,170,255,0.22)');
+      ig.addColorStop(1, 'rgba(80,170,255,0)');
+      ctx.fillStyle = ig;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 38 * pulse, 0, Math.PI * 2);
+      ctx.fill();
+      // Core
+      ctx.fillStyle = 'rgba(220,240,255,0.95)';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 5 + Math.sin(s.phase * 1.4) * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Embers
+    for (const e of state.embers) {
+      const pulse = 1 + Math.sin(e.phase) * 0.22;
+      const ig = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, 30 * pulse);
+      ig.addColorStop(0, 'rgba(255,150,90,0.55)');
+      ig.addColorStop(0.4, 'rgba(220,80,60,0.22)');
+      ig.addColorStop(1, 'rgba(220,80,60,0)');
+      ctx.fillStyle = ig;
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, 30 * pulse, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,200,150,0.95)';
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, 5 + Math.sin(e.phase * 1.6) * 0.8, 0, Math.PI * 2);
+      ctx.fill();
+      // Trail behind ember
+      const tlen = 18;
+      const tx = e.x - (e.vx / Math.hypot(e.vx, e.vy)) * tlen;
+      const ty = e.y - (e.vy / Math.hypot(e.vx, e.vy)) * tlen;
+      const grad = ctx.createLinearGradient(e.x, e.y, tx, ty);
+      grad.addColorStop(0, 'rgba(255,150,90,0.4)');
+      grad.addColorStop(1, 'rgba(255,150,90,0)');
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(e.x, e.y);
+      ctx.lineTo(tx, ty);
+      ctx.stroke();
+    }
+
+    // Particles
+    for (const p of state.particles) {
+      const a = Math.max(0, p.life);
+      ctx.fillStyle = `rgba(${p.color},${a})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * (0.5 + a * 0.7), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Flock
+    for (const b of state.flock) b.draw();
+  }
+
+  // Input
+  function setFinger(x, y, active) {
+    state.finger.x = x;
+    state.finger.y = y;
+    state.finger.active = active;
+  }
+  function getPoint(e) {
+    if (e.touches && e.touches.length) {
+      return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    }
+    return { x: e.clientX, y: e.clientY };
+  }
+
+  function onDown(e) {
+    if (!state.running) return;
+    e.preventDefault();
+    const p = getPoint(e);
+    state.finger.lastX = p.x; state.finger.lastY = p.y;
+    setFinger(p.x, p.y, true);
+    state.ripples.push({ x: p.x, y: p.y, r: 10, life: 1, color: '255,220,170' });
+  }
+  function onMove(e) {
+    if (!state.running) return;
+    e.preventDefault();
+    const p = getPoint(e);
+    setFinger(p.x, p.y, true);
+  }
+  function onUp(e) {
+    if (!state.running) return;
+    e.preventDefault();
+    state.finger.active = false;
+  }
+
+  cv.addEventListener('touchstart', onDown, { passive: false });
+  cv.addEventListener('touchmove', onMove, { passive: false });
+  cv.addEventListener('touchend', onUp, { passive: false });
+  cv.addEventListener('touchcancel', onUp, { passive: false });
+  cv.addEventListener('mousedown', onDown);
+  window.addEventListener('mousemove', e => { if (state.running && state.finger.active) onMove(e); });
+  window.addEventListener('mouseup', e => { if (state.running) onUp(e); });
+
+  document.getElementById('startBtn').addEventListener('click', start);
+
+  // Initial idle render so canvas isn't blank behind title
+  state.finger.x = W / 2;
+  state.finger.y = H / 2;
+  function idleLoop() {
+    if (state.running) return;
+    ctx.fillStyle = '#050814';
+    ctx.fillRect(0, 0, W, H);
+    const vg = ctx.createRadialGradient(W/2, H/2, Math.min(W, H) * 0.3, W/2, H/2, Math.max(W, H) * 0.75);
+    vg.addColorStop(0, 'rgba(20,30,60,0.3)');
+    vg.addColorStop(1, 'rgba(0,0,0,0.55)');
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, W, H);
+    for (const s of stars) {
+      s.tw += 0.008;
+      const a = s.a * (0.7 + 0.3 * Math.sin(s.tw));
+      ctx.fillStyle = `rgba(200,220,255,${a})`;
+      ctx.beginPath();
+      ctx.arc(s.x * W, s.y * H, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    requestAnimationFrame(idleLoop);
+  }
+  idleLoop();
+})();
+</script>
+</body>
+</html>
