@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#03050f">
+<title>Whorl</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    background: radial-gradient(ellipse at 50% 30%, #15193d 0%, #06081c 60%, #02030a 100%);
+    color: #e6e9ff;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Helvetica Neue", sans-serif;
+    overscroll-behavior: none;
+    position: fixed;
+    inset: 0;
+  }
+  canvas { display: block; position: absolute; top: 0; left: 0; }
+  .hud {
+    position: absolute; top: 0; left: 0; right: 0;
+    padding: 16px 18px 0;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    pointer-events: none;
+    z-index: 5;
+    text-shadow: 0 0 10px rgba(0,0,0,0.7);
+  }
+  .hud .score {
+    font-size: 28px; font-weight: 800; letter-spacing: 0.5px;
+    color: #ffe9a4;
+    text-shadow: 0 0 14px rgba(255,217,122,0.45);
+  }
+  .hud .label {
+    font-size: 10px; letter-spacing: 2px; color: #99a3c0;
+    text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+  .hud .time {
+    font-size: 22px; font-weight: 700;
+    color: #b6e1ff;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    text-shadow: 0 0 14px rgba(182,225,255,0.35);
+  }
+  .back-link {
+    position: absolute; bottom: 14px; left: 14px;
+    color: #9aa6c4; text-decoration: none;
+    font-size: 13px;
+    background: rgba(0,0,0,0.32); padding: 8px 14px;
+    border-radius: 14px;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 30;
+    pointer-events: auto;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .overlay {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center;
+    background: radial-gradient(ellipse at center, rgba(8,12,40,0.78), rgba(2,3,12,0.94));
+    z-index: 20;
+    padding: 28px;
+    transition: opacity 0.45s ease;
+  }
+  .overlay.hidden { opacity: 0; pointer-events: none; }
+  .overlay h1 {
+    font-size: 52px;
+    font-weight: 900;
+    letter-spacing: 8px;
+    margin-bottom: 22px;
+    background: linear-gradient(135deg, #ffd97a 0%, #ff79c6 45%, #8be9fd 95%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    filter: drop-shadow(0 0 24px rgba(255,121,198,0.25));
+  }
+  .overlay .desc {
+    font-size: 15px; line-height: 1.75;
+    color: #c8cfee;
+    margin-bottom: 6px;
+    max-width: 280px;
+  }
+  .overlay .tip {
+    font-size: 13px; opacity: 0.7;
+    margin-top: 18px;
+    color: #9aa3c0;
+    line-height: 1.6;
+  }
+  .overlay button {
+    margin-top: 30px;
+    padding: 15px 38px;
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: 3px;
+    color: #1a1126;
+    background: linear-gradient(135deg, #ffd97a, #ff79c6);
+    border: none;
+    border-radius: 32px;
+    box-shadow: 0 8px 26px rgba(255,121,198,0.38), 0 0 26px rgba(255,217,122,0.25);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 0.12s ease;
+  }
+  .overlay button:active { transform: scale(0.95); }
+  .score-final {
+    font-size: 72px; font-weight: 900;
+    color: #ffe9a4;
+    text-shadow: 0 0 36px rgba(255,217,122,0.55);
+    margin: 4px 0 0;
+    letter-spacing: 1px;
+  }
+  .stars-final { font-size: 14px; color: #b6e1ff; letter-spacing: 1.5px; margin-bottom: 8px; }
+  .big-label { font-size: 11px; letter-spacing: 4px; color: #99a3c0; text-transform: uppercase; }
+  .hint-arrow { display: inline-block; animation: spin 3s linear infinite; }
+  @keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div class="hud" id="hud">
+  <div>
+    <div class="label">SCORE</div>
+    <div class="score" id="score">0</div>
+  </div>
+  <div>
+    <div class="label">TIME</div>
+    <div class="time" id="time">60</div>
+  </div>
+</div>
+
+<a class="back-link" href="../../index.html">← ギャラリー</a>
+
+<div class="overlay" id="overlay">
+  <div class="big-label">SPIRAL ACTION</div>
+  <h1>WHORL</h1>
+  <div class="desc">輝くオーブを指で<br><span class="hint-arrow">↻</span> ぐるぐる巻きつけよう。</div>
+  <div class="desc">2周ほど巻けば崩壊して星になる。</div>
+  <div class="tip">素早く巻くほど高得点。<br>60秒で何個の星を生み出せる？</div>
+  <button id="start">START</button>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  let W = 0, H = 0, DPR = 1;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', resize);
+
+  const COLORS = [
+    { core: '#8be9fd', glow: 'rgba(139,233,253,', burst: '#bef5ff' },
+    { core: '#ff79c6', glow: 'rgba(255,121,198,', burst: '#ffbde5' },
+    { core: '#ffd97a', glow: 'rgba(255,217,122,', burst: '#fff0c0' },
+    { core: '#a0ff95', glow: 'rgba(160,255,149,', burst: '#d6ffce' },
+    { core: '#b59cff', glow: 'rgba(181,156,255,', burst: '#d9c9ff' }
+  ];
+
+  let orbs = [];
+  let particles = [];
+  let ripples = [];
+  let trail = [];
+  let bgStars = [];
+  let bornStars = [];
+
+  let score = 0;
+  let timeLeft = 60;
+  let elapsed = 0;
+  let lastSpawn = 0;
+  let running = false;
+
+  let touch = null;
+  let activeOrb = null;
+  let lastAngle = null;
+  let windDirection = 0;
+
+  const overlay = document.getElementById('overlay');
+  const startBtn = document.getElementById('start');
+  const scoreEl = document.getElementById('score');
+  const timeEl = document.getElementById('time');
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+
+  function makeBgStars() {
+    bgStars = [];
+    const n = Math.floor((W * H) / 9000);
+    for (let i = 0; i < n; i++) {
+      bgStars.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        r: Math.random() * 1.3 + 0.15,
+        a: Math.random() * 0.7 + 0.15,
+        tw: Math.random() * Math.PI * 2,
+        sp: rand(0.4, 1.4)
+      });
+    }
+  }
+  makeBgStars();
+  window.addEventListener('resize', makeBgStars);
+
+  function spawnOrb() {
+    const margin = 80;
+    const topPad = 110;
+    const bottomPad = 90;
+    const x = rand(margin, W - margin);
+    const y = rand(topPad, H - bottomPad);
+    const c = COLORS[Math.floor(Math.random() * COLORS.length)];
+    const difficulty = Math.min(1, elapsed / 50);
+    const target = 360 * (1.5 + difficulty * 1.2);
+    const speed = rand(0.08, 0.22) * (1 + difficulty * 0.8);
+    const ang = Math.random() * Math.PI * 2;
+    orbs.push({
+      x, y,
+      vx: Math.cos(ang) * speed,
+      vy: Math.sin(ang) * speed,
+      r: 24 + Math.random() * 6,
+      color: c,
+      angle: 0,
+      target,
+      pulse: Math.random() * Math.PI * 2,
+      life: 13 - difficulty * 5,
+      maxLife: 13 - difficulty * 5,
+      hot: 0,
+      windStart: 0,
+      birth: 0
+    });
+  }
+
+  function burst(x, y, color, big) {
+    const n = big ? 36 : 26;
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = rand(2, big ? 7 : 5);
+      particles.push({
+        x, y,
+        vx: Math.cos(a) * s,
+        vy: Math.sin(a) * s,
+        r: rand(1.5, 3),
+        life: rand(0.5, 1.0),
+        age: 0,
+        color: color.burst,
+        decay: 0.93
+      });
+    }
+    for (let i = 0; i < 14; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = rand(0.4, 1.8);
+      particles.push({
+        x, y,
+        vx: Math.cos(a) * s,
+        vy: Math.sin(a) * s,
+        r: rand(2.5, 4),
+        life: rand(0.9, 1.6),
+        age: 0,
+        color: color.core,
+        decay: 0.96
+      });
+    }
+    ripples.push({ x, y, r: 10, max: 120, age: 0, life: 0.7, color: color.core });
+  }
+
+  function pickOrb(x, y) {
+    let best = null, bestDist = 95 * 95;
+    for (const o of orbs) {
+      const dx = x - o.x, dy = y - o.y;
+      const d = dx*dx + dy*dy;
+      if (d < bestDist) { bestDist = d; best = o; }
+    }
+    return best;
+  }
+
+  function pointerStart(x, y) {
+    if (!running) return;
+    touch = { x, y };
+    trail = [{ x, y, age: 0 }];
+    activeOrb = pickOrb(x, y);
+    if (activeOrb) {
+      lastAngle = Math.atan2(y - activeOrb.y, x - activeOrb.x);
+      activeOrb.hot = 1;
+      activeOrb.windStart = elapsed;
+      windDirection = 0;
+    } else {
+      lastAngle = null;
+    }
+  }
+
+  function pointerMove(x, y) {
+    if (!running || !touch) return;
+    touch.x = x; touch.y = y;
+    trail.push({ x, y, age: 0 });
+    if (trail.length > 32) trail.shift();
+
+    // Stay with active orb until far away
+    if (activeOrb) {
+      const dx = x - activeOrb.x, dy = y - activeOrb.y;
+      if (dx*dx + dy*dy > 160*160) {
+        activeOrb.hot = 0;
+        activeOrb = null;
+        lastAngle = null;
+      }
+    }
+    if (!activeOrb) {
+      const c = pickOrb(x, y);
+      if (c) {
+        activeOrb = c;
+        activeOrb.hot = 1;
+        lastAngle = Math.atan2(y - c.y, x - c.x);
+        activeOrb.windStart = elapsed;
+        windDirection = 0;
+      }
+    }
+
+    if (activeOrb && lastAngle !== null) {
+      const a = Math.atan2(y - activeOrb.y, x - activeOrb.x);
+      let delta = a - lastAngle;
+      while (delta > Math.PI) delta -= 2 * Math.PI;
+      while (delta < -Math.PI) delta += 2 * Math.PI;
+      activeOrb.angle += delta * (180 / Math.PI);
+      lastAngle = a;
+
+      // Visual: emit a small particle along finger path inside the orb's color
+      if (Math.random() < 0.6) {
+        particles.push({
+          x: x + rand(-3, 3), y: y + rand(-3, 3),
+          vx: rand(-0.3, 0.3), vy: rand(-0.3, 0.3),
+          r: rand(1, 2),
+          life: rand(0.3, 0.6),
+          age: 0,
+          color: activeOrb.color.core,
+          decay: 0.95
+        });
+      }
+
+      if (Math.abs(activeOrb.angle) >= activeOrb.target) {
+        const time = elapsed - activeOrb.windStart;
+        const speedBonus = time < 1.2 ? 3 : time < 2.5 ? 2 : 1;
+        const lifeFrac = activeOrb.life / activeOrb.maxLife;
+        const pts = Math.round(100 * speedBonus * (0.8 + lifeFrac * 0.4));
+        score += pts;
+        scoreEl.textContent = score;
+        burst(activeOrb.x, activeOrb.y, activeOrb.color, speedBonus >= 2);
+        bornStars.push({
+          x: activeOrb.x + rand(-30, 30),
+          y: activeOrb.y + rand(-30, 30),
+          r: rand(1.0, 2.0),
+          a: 0.9,
+          tw: Math.random() * Math.PI * 2,
+          sp: rand(0.6, 1.4),
+          age: 0
+        });
+        if (navigator.vibrate) navigator.vibrate(speedBonus >= 2 ? [20, 30, 30] : 24);
+        const idx = orbs.indexOf(activeOrb);
+        if (idx >= 0) orbs.splice(idx, 1);
+        activeOrb = null;
+        lastAngle = null;
+      }
+    }
+  }
+
+  function pointerEnd() {
+    touch = null;
+    if (activeOrb) activeOrb.hot = 0;
+    activeOrb = null;
+    lastAngle = null;
+  }
+
+  canvas.addEventListener('touchstart', e => {
+    e.preventDefault();
+    const t = e.touches[0];
+    pointerStart(t.clientX, t.clientY);
+  }, { passive: false });
+  canvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    const t = e.touches[0];
+    pointerMove(t.clientX, t.clientY);
+  }, { passive: false });
+  canvas.addEventListener('touchend', e => { e.preventDefault(); pointerEnd(); }, { passive: false });
+  canvas.addEventListener('touchcancel', e => { e.preventDefault(); pointerEnd(); }, { passive: false });
+
+  let mouseDown = false;
+  canvas.addEventListener('mousedown', e => { mouseDown = true; pointerStart(e.clientX, e.clientY); });
+  canvas.addEventListener('mousemove', e => { if (mouseDown) pointerMove(e.clientX, e.clientY); });
+  canvas.addEventListener('mouseup', () => { mouseDown = false; pointerEnd(); });
+  canvas.addEventListener('mouseleave', () => { mouseDown = false; pointerEnd(); });
+
+  function startGame() {
+    overlay.classList.add('hidden');
+    orbs = [];
+    particles = [];
+    ripples = [];
+    trail = [];
+    bornStars = [];
+    score = 0;
+    elapsed = 0;
+    timeLeft = 60;
+    lastSpawn = 0;
+    scoreEl.textContent = '0';
+    timeEl.textContent = '60';
+    running = true;
+    spawnOrb();
+  }
+
+  function endGame() {
+    running = false;
+    pointerEnd();
+    overlay.innerHTML = `
+      <div class="big-label">RESULT</div>
+      <div class="score-final">${score}</div>
+      <div class="stars-final">${bornStars.length} STARS BORN</div>
+      <div class="desc" style="margin-top:18px">静かな宇宙に、いくつかの<br>新しい星が増えました。</div>
+      <button id="again">もう一度</button>
+    `;
+    overlay.classList.remove('hidden');
+    document.getElementById('again').addEventListener('click', startGame);
+  }
+
+  startBtn.addEventListener('click', startGame);
+
+  let lastFrame = performance.now();
+  function loop(now) {
+    const dt = Math.min(0.05, (now - lastFrame) / 1000);
+    lastFrame = now;
+
+    if (running) {
+      elapsed += dt;
+      timeLeft -= dt;
+      if (timeLeft <= 0) {
+        timeLeft = 0;
+        timeEl.textContent = '0';
+        endGame();
+      } else {
+        timeEl.textContent = Math.ceil(timeLeft);
+      }
+
+      lastSpawn += dt;
+      const spawnRate = Math.max(0.9, 2.6 - elapsed / 28);
+      const maxOrbs = Math.min(5, 2 + Math.floor(elapsed / 14));
+      if (lastSpawn > spawnRate && orbs.length < maxOrbs) {
+        spawnOrb();
+        lastSpawn = 0;
+      }
+
+      for (let i = orbs.length - 1; i >= 0; i--) {
+        const o = orbs[i];
+        o.x += o.vx;
+        o.y += o.vy;
+        if (o.x < 50) { o.x = 50; o.vx = Math.abs(o.vx); }
+        if (o.x > W - 50) { o.x = W - 50; o.vx = -Math.abs(o.vx); }
+        if (o.y < 100) { o.y = 100; o.vy = Math.abs(o.vy); }
+        if (o.y > H - 80) { o.y = H - 80; o.vy = -Math.abs(o.vy); }
+        o.pulse += dt * 3;
+        o.birth += dt;
+        if (o !== activeOrb) {
+          o.life -= dt;
+          if (o.life <= 0) {
+            // fade out — small puff
+            for (let k = 0; k < 8; k++) {
+              const a = Math.random() * Math.PI * 2;
+              const s = rand(0.4, 1.5);
+              particles.push({
+                x: o.x, y: o.y,
+                vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+                r: rand(1, 2),
+                life: rand(0.4, 0.7),
+                age: 0,
+                color: o.color.core,
+                decay: 0.94
+              });
+            }
+            orbs.splice(i, 1);
+          }
+        }
+      }
+    }
+
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.age += dt;
+      if (p.age >= p.life) { particles.splice(i, 1); continue; }
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vx *= p.decay;
+      p.vy *= p.decay;
+    }
+    for (let i = ripples.length - 1; i >= 0; i--) {
+      const r = ripples[i];
+      r.age += dt;
+      if (r.age >= r.life) ripples.splice(i, 1);
+    }
+    for (let i = trail.length - 1; i >= 0; i--) {
+      trail[i].age += dt;
+      if (trail[i].age > 0.5) trail.splice(i, 1);
+    }
+    for (const s of bgStars) s.tw += dt * s.sp;
+    for (const s of bornStars) { s.tw += dt * s.sp; s.age += dt; }
+
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function draw() {
+    ctx.fillStyle = 'rgba(2,3,12,0.32)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Background stars
+    for (const s of bgStars) {
+      const a = s.a * (0.55 + 0.45 * Math.sin(s.tw));
+      ctx.globalAlpha = a;
+      ctx.fillStyle = '#cfd6ff';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Born stars (brighter, twinkle bigger)
+    for (const s of bornStars) {
+      const baseA = Math.min(1, s.a);
+      const a = baseA * (0.6 + 0.4 * Math.sin(s.tw));
+      ctx.globalAlpha = a;
+      ctx.fillStyle = '#ffe9a4';
+      ctx.shadowColor = '#ffd97a';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r + 0.6 * Math.sin(s.tw * 2), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+    ctx.globalAlpha = 1;
+
+    // Ripples (shockwaves)
+    for (const r of ripples) {
+      const t = r.age / r.life;
+      const rad = r.r + (r.max - r.r) * t;
+      ctx.globalAlpha = (1 - t) * 0.6;
+      ctx.strokeStyle = r.color;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(r.x, r.y, rad, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // Orbs
+    for (const o of orbs) {
+      const progress = Math.min(1, Math.abs(o.angle) / o.target);
+      const pulse = 1 + Math.sin(o.pulse) * 0.08;
+      const r = o.r * pulse * (1 - progress * 0.18);
+      const spawn = Math.min(1, o.birth / 0.4);
+
+      ctx.globalAlpha = spawn;
+
+      // Outer glow
+      const glowR = r * (3.4 + Math.sin(o.pulse * 1.3) * 0.2);
+      const grad = ctx.createRadialGradient(o.x, o.y, 0, o.x, o.y, glowR);
+      grad.addColorStop(0, o.color.glow + '0.78)');
+      grad.addColorStop(0.35, o.color.glow + '0.28)');
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(o.x, o.y, glowR, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Fading life ring (warning)
+      const lifeFrac = o.life / o.maxLife;
+      if (lifeFrac < 0.45 && o !== activeOrb) {
+        const wf = (0.45 - lifeFrac) / 0.45;
+        ctx.strokeStyle = `rgba(255,120,140,${0.25 + wf * 0.5})`;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 7]);
+        ctx.beginPath();
+        ctx.arc(o.x, o.y, r + 22 + Math.sin(o.pulse * 2) * 2, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      // Winding rotating arrows (only when active and progress > 0)
+      if (progress > 0) {
+        const startAngle = -Math.PI / 2;
+        const arcLen = Math.PI * 2 * progress * Math.sign(o.angle || 1);
+        ctx.strokeStyle = o.color.core;
+        ctx.lineWidth = 5;
+        ctx.lineCap = 'round';
+        ctx.shadowColor = o.color.core;
+        ctx.shadowBlur = 16;
+        ctx.beginPath();
+        ctx.arc(o.x, o.y, r + 14, startAngle, startAngle + arcLen, arcLen < 0);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+      }
+
+      // Active highlight ring (spinning dashed)
+      if (o.hot) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.34)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([6, 10]);
+        ctx.lineDashOffset = -(elapsed * 60) % 1000;
+        ctx.beginPath();
+        ctx.arc(o.x, o.y, r + 28, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.lineDashOffset = 0;
+      }
+
+      // Core
+      ctx.fillStyle = o.color.core;
+      ctx.shadowColor = o.color.core;
+      ctx.shadowBlur = 16;
+      ctx.beginPath();
+      ctx.arc(o.x, o.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // Inner highlight
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.beginPath();
+      ctx.arc(o.x - r * 0.32, o.y - r * 0.32, r * 0.32, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.globalAlpha = 1;
+    }
+
+    // Trail
+    if (trail.length > 1) {
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      const baseColor = activeOrb ? activeOrb.color.core : '#ffffff';
+      for (let i = 1; i < trail.length; i++) {
+        const a1 = 1 - trail[i-1].age / 0.5;
+        const a2 = 1 - trail[i].age / 0.5;
+        const a = Math.min(a1, a2);
+        if (a <= 0) continue;
+        ctx.strokeStyle = baseColor;
+        ctx.globalAlpha = a * 0.65;
+        ctx.lineWidth = 6 * a;
+        ctx.shadowColor = baseColor;
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.moveTo(trail[i-1].x, trail[i-1].y);
+        ctx.lineTo(trail[i].x, trail[i].y);
+        ctx.stroke();
+      }
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
+    }
+
+    // Particles
+    for (const p of particles) {
+      const a = 1 - p.age / p.life;
+      ctx.globalAlpha = a;
+      ctx.fillStyle = p.color;
+      ctx.shadowColor = p.color;
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+  }
+
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
