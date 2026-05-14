@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#06091a">
+<title>Beacon</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: #06091a;
+    color: #e6efff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #wrap {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column;
+    background: radial-gradient(ellipse at 50% 110%, #1a2848 0%, #0a0f24 55%, #06091a 100%);
+  }
+  #topbar {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 18px 6px;
+    font-size: 14px; letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  #topbar a {
+    color: #88a4d8; text-decoration: none;
+    background: rgba(255,255,255,0.05);
+    padding: 6px 12px; border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .stats { display: flex; gap: 14px; align-items: center; }
+  .stat { display: flex; flex-direction: column; align-items: flex-end; }
+  .stat .label { font-size: 10px; color: #6e85b3; letter-spacing: 0.18em; }
+  .stat .val { font-size: 18px; font-weight: 600; color: #f0f6ff; font-variant-numeric: tabular-nums; }
+  .lives { display: flex; gap: 4px; }
+  .lives span {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #ffd27a; box-shadow: 0 0 8px #ffae3a;
+    transition: opacity .3s, transform .3s;
+  }
+  .lives span.lost { opacity: 0.15; transform: scale(0.6); box-shadow: none; background: #444; }
+  canvas { flex: 1; display: block; width: 100%; height: 100%; }
+  #overlay {
+    position: absolute; inset: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(6, 9, 26, 0.78);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    transition: opacity .35s;
+  }
+  #overlay.hidden { opacity: 0; pointer-events: none; }
+  .panel {
+    width: min(82vw, 320px);
+    padding: 26px 24px 22px;
+    text-align: center;
+  }
+  .panel h1 {
+    font-size: 30px; font-weight: 700;
+    letter-spacing: 0.18em; margin-bottom: 6px;
+    background: linear-gradient(180deg, #fff7d8, #ffb648 70%, #ff7847);
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent;
+    text-shadow: 0 0 24px rgba(255,170,80,0.35);
+  }
+  .panel p.sub {
+    font-size: 12px; letter-spacing: 0.16em;
+    color: #88a4d8; margin-bottom: 18px;
+  }
+  .panel p.body {
+    font-size: 13px; line-height: 1.7; color: #cfd9ee;
+    margin-bottom: 22px;
+  }
+  .panel .big { font-size: 44px; font-weight: 700; color: #ffd27a; margin: 4px 0 2px; }
+  .panel .small { font-size: 11px; color: #6e85b3; letter-spacing: 0.12em; margin-bottom: 18px; }
+  .btn {
+    display: inline-block;
+    padding: 12px 28px;
+    background: linear-gradient(180deg, #ffcb6e, #ff8a3a);
+    color: #2a1505;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: 0.16em;
+    box-shadow: 0 6px 18px rgba(255,140,60,0.35), inset 0 1px 0 rgba(255,255,255,0.4);
+    cursor: pointer;
+  }
+  .btn:active { transform: translateY(1px); }
+  .hint {
+    margin-top: 14px; font-size: 11px; color: #6e85b3;
+    letter-spacing: 0.1em;
+  }
+  .legend {
+    display: flex; justify-content: center; gap: 16px;
+    margin: 6px 0 18px; font-size: 11px; color: #cfd9ee;
+  }
+  .legend .item { display: flex; align-items: center; gap: 6px; }
+  .legend .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .legend .blue { background: #8ecbff; box-shadow: 0 0 8px #5da6ff; }
+  .legend .red { background: #ff5860; box-shadow: 0 0 8px #ff3038; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="topbar">
+    <a href="../../index.html">← 戻る</a>
+    <div class="stats">
+      <div class="lives" id="lives"><span></span><span></span><span></span></div>
+      <div class="stat"><div class="label">SAVED</div><div class="val" id="score">0</div></div>
+    </div>
+  </div>
+  <canvas id="game"></canvas>
+  <div id="overlay">
+    <div class="panel" id="panel">
+      <h1>BEACON</h1>
+      <p class="sub">霧夜の灯台</p>
+      <p class="body">指で画面をなぞって光を回す。<br>白い船を光で照らし続けて帰路を示せ。<br><span style="color:#ff8a92">赤い亡霊船には光を当てるな。</span></p>
+      <div class="legend">
+        <div class="item"><span class="dot blue"></span>救助</div>
+        <div class="item"><span class="dot red"></span>避ける</div>
+      </div>
+      <div class="btn" id="startBtn">START</div>
+      <div class="hint">船が灯台に達すると 1 ライフ失う</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const overlay = document.getElementById('overlay');
+  const panel = document.getElementById('panel');
+  const startBtn = document.getElementById('startBtn');
+  const scoreEl = document.getElementById('score');
+  const livesEl = document.getElementById('lives');
+
+  let W = 0, H = 0, DPR = 1;
+  let lighthouse = { x: 0, y: 0 };
+  let beamAngle = -Math.PI / 2;  // pointing up
+  let targetAngle = -Math.PI / 2;
+  const BEAM_HALF_WIDTH = 0.32;   // radians (~18°)
+  let beamRange = 0;
+
+  let ships = [];
+  let particles = [];
+  let ripples = [];
+  let score = 0;
+  let lives = 3;
+  let running = false;
+  let t0 = 0;
+  let lastSpawn = 0;
+  let lastT = 0;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2.5);
+    const rect = canvas.getBoundingClientRect();
+    W = rect.width; H = rect.height;
+    canvas.width = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    lighthouse.x = W / 2;
+    lighthouse.y = H - Math.min(H * 0.16, 110);
+    beamRange = Math.hypot(W, H) * 0.95;
+  }
+  window.addEventListener('resize', resize);
+
+  function setLives(n) {
+    lives = n;
+    const dots = livesEl.querySelectorAll('span');
+    dots.forEach((d, i) => d.classList.toggle('lost', i >= lives));
+  }
+
+  function rng(min, max) { return min + Math.random() * (max - min); }
+
+  function spawnShip(elapsed) {
+    // Spawn around the upper half from the lighthouse
+    const a = rng(-Math.PI + 0.25, -0.25);
+    const r = Math.hypot(W, H) * 0.58;
+    const x = lighthouse.x + Math.cos(a) * r;
+    const y = lighthouse.y + Math.sin(a) * r;
+    // Difficulty: more reds and faster ships over time
+    const phantomChance = Math.min(0.32, 0.08 + elapsed / 90);
+    const isPhantom = Math.random() < phantomChance;
+    const speedBase = 22 + Math.min(28, elapsed * 0.55);   // px/sec
+    const speed = speedBase * rng(0.85, 1.15);
+    ships.push({
+      x, y,
+      // angle toward lighthouse with slight wobble
+      vx: 0, vy: 0,
+      angle: 0,
+      speed,
+      phantom: isPhantom,
+      progress: 0,          // 0..1 fills while illuminated
+      need: isPhantom ? 0 : rng(1.3, 1.9),  // seconds of light needed
+      saved: false,
+      dead: false,
+      fade: 1,
+      wobble: rng(0, Math.PI * 2),
+      wobbleAmp: rng(0.0, 0.25),
+      size: rng(11, 15),
+    });
+    const s = ships[ships.length - 1];
+    const dx = lighthouse.x - s.x, dy = lighthouse.y - s.y;
+    const len = Math.hypot(dx, dy);
+    s.angle = Math.atan2(dy, dx);
+    s.vx = (dx / len) * s.speed;
+    s.vy = (dy / len) * s.speed;
+  }
+
+  function emitParticles(x, y, color, count, spread) {
+    for (let i = 0; i < count; i++) {
+      const a = rng(0, Math.PI * 2);
+      const sp = rng(40, 160) * (spread || 1);
+      particles.push({
+        x, y,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp,
+        life: rng(0.4, 0.9),
+        age: 0,
+        color,
+        size: rng(1.4, 3.0),
+      });
+    }
+  }
+
+  function addRipple(x, y, color) {
+    ripples.push({ x, y, r: 6, maxR: 60, age: 0, life: 0.6, color });
+  }
+
+  // Input
+  function pointerToAngle(px, py) {
+    return Math.atan2(py - lighthouse.y, px - lighthouse.x);
+  }
+  function onPointer(e) {
+    if (!running) return;
+    const rect = canvas.getBoundingClientRect();
+    let px, py;
+    if (e.touches && e.touches.length) {
+      px = e.touches[0].clientX - rect.left;
+      py = e.touches[0].clientY - rect.top;
+    } else {
+      px = e.clientX - rect.left;
+      py = e.clientY - rect.top;
+    }
+    targetAngle = pointerToAngle(px, py);
+    e.preventDefault();
+  }
+  canvas.addEventListener('touchstart', onPointer, { passive: false });
+  canvas.addEventListener('touchmove', onPointer, { passive: false });
+  canvas.addEventListener('mousedown', (e) => { isMouse = true; onPointer(e); });
+  canvas.addEventListener('mousemove', (e) => { if (isMouse) onPointer(e); });
+  canvas.addEventListener('mouseup', () => { isMouse = false; });
+  let isMouse = false;
+
+  // Beam smoothing: rotate beamAngle toward targetAngle via shortest arc
+  function angleStep(cur, tgt, maxStep) {
+    let d = tgt - cur;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    if (Math.abs(d) <= maxStep) return tgt;
+    return cur + Math.sign(d) * maxStep;
+  }
+  function angleDiff(a, b) {
+    let d = a - b;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return d;
+  }
+
+  function update(dt, elapsed) {
+    // beam rotation
+    beamAngle = angleStep(beamAngle, targetAngle, dt * 8.0);
+
+    // spawn ships
+    const spawnInterval = Math.max(0.55, 1.7 - elapsed * 0.018);
+    if (elapsed - lastSpawn > spawnInterval) {
+      lastSpawn = elapsed;
+      spawnShip(elapsed);
+    }
+
+    // ships
+    for (const s of ships) {
+      if (s.saved || s.dead) {
+        s.fade -= dt * 1.6;
+        continue;
+      }
+      // wobble drift
+      s.wobble += dt * 1.6;
+      const perpX = -s.vy / s.speed, perpY = s.vx / s.speed;
+      const sway = Math.sin(s.wobble) * s.wobbleAmp * 18;
+      s.x += s.vx * dt + perpX * sway * dt;
+      s.y += s.vy * dt + perpY * sway * dt;
+
+      // check if in beam
+      const dx = s.x - lighthouse.x, dy = s.y - lighthouse.y;
+      const dist = Math.hypot(dx, dy);
+      const ang = Math.atan2(dy, dx);
+      const inBeamArc = Math.abs(angleDiff(ang, beamAngle)) < BEAM_HALF_WIDTH;
+      const inBeam = inBeamArc && dist < beamRange && dist > 28;
+
+      if (inBeam) {
+        if (s.phantom) {
+          // bad: lose life
+          s.dead = true;
+          loseLife(s);
+          emitParticles(s.x, s.y, '#ff5860', 28, 1.2);
+          addRipple(s.x, s.y, '#ff5860');
+        } else {
+          s.progress += dt / s.need;
+          if (Math.random() < 0.6) {
+            particles.push({
+              x: s.x + rng(-6, 6), y: s.y + rng(-6, 6),
+              vx: rng(-30, 30), vy: rng(-50, -10),
+              life: 0.6, age: 0, color: '#ffd27a', size: rng(1.2, 2.4),
+            });
+          }
+          if (s.progress >= 1) {
+            s.saved = true;
+            score++;
+            scoreEl.textContent = score;
+            emitParticles(s.x, s.y, '#9fd4ff', 22, 1.0);
+            addRipple(s.x, s.y, '#9fd4ff');
+            if (navigator.vibrate) navigator.vibrate(20);
+            // ship sails away: reverse velocity
+            s.vx = -s.vx; s.vy = -s.vy;
+          }
+        }
+      } else {
+        // slowly decay progress if not illuminated
+        s.progress = Math.max(0, s.progress - dt * 0.25);
+      }
+
+      // reached lighthouse
+      if (!s.saved && !s.dead && dist < 36) {
+        s.dead = true;
+        if (s.phantom) {
+          // phantom that wasn't illuminated: it passes harmlessly? No — phantoms also hurt at lighthouse
+          loseLife(s);
+          emitParticles(s.x, s.y, '#ff5860', 22, 1.0);
+        } else {
+          loseLife(s);
+          emitParticles(s.x, s.y, '#88a4d8', 20, 0.9);
+        }
+        addRipple(lighthouse.x, lighthouse.y, '#ff5860');
+      }
+    }
+    // sailing-away ships: remove off-screen or fully faded
+    ships = ships.filter(s => s.fade > 0 && s.x > -60 && s.x < W + 60 && s.y > -60 && s.y < H + 60);
+
+    // particles
+    for (const p of particles) {
+      p.age += dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= (1 - dt * 1.5);
+      p.vy = p.vy * (1 - dt * 1.5) + 40 * dt;  // slight gravity
+    }
+    particles = particles.filter(p => p.age < p.life);
+
+    // ripples
+    for (const r of ripples) {
+      r.age += dt;
+      r.r = 6 + (r.maxR - 6) * (r.age / r.life);
+    }
+    ripples = ripples.filter(r => r.age < r.life);
+  }
+
+  function loseLife(s) {
+    setLives(lives - 1);
+    if (navigator.vibrate) navigator.vibrate([20, 40, 20]);
+    if (lives <= 0) endGame();
+  }
+
+  // Drawing
+  function drawSea(elapsed) {
+    // Faint horizontal bands suggesting waves
+    ctx.save();
+    for (let i = 0; i < 6; i++) {
+      const y = H * (0.25 + i * 0.13) + Math.sin(elapsed * 0.4 + i) * 3;
+      const grad = ctx.createLinearGradient(0, y, W, y);
+      grad.addColorStop(0, 'rgba(120,160,220,0)');
+      grad.addColorStop(0.5, 'rgba(120,160,220,0.05)');
+      grad.addColorStop(1, 'rgba(120,160,220,0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, y, W, 1.4);
+    }
+    ctx.restore();
+  }
+
+  function drawBeam() {
+    const lx = lighthouse.x, ly = lighthouse.y;
+    const r = beamRange;
+    const a1 = beamAngle - BEAM_HALF_WIDTH;
+    const a2 = beamAngle + BEAM_HALF_WIDTH;
+
+    // Outer soft halo
+    ctx.save();
+    const grad = ctx.createRadialGradient(lx, ly, 8, lx, ly, r);
+    grad.addColorStop(0, 'rgba(255, 230, 160, 0.55)');
+    grad.addColorStop(0.18, 'rgba(255, 220, 140, 0.22)');
+    grad.addColorStop(0.55, 'rgba(255, 210, 130, 0.06)');
+    grad.addColorStop(1, 'rgba(255, 210, 130, 0)');
+    ctx.fillStyle = grad;
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.beginPath();
+    ctx.moveTo(lx, ly);
+    ctx.arc(lx, ly, r, a1, a2);
+    ctx.closePath();
+    ctx.fill();
+
+    // Inner brighter core
+    const grad2 = ctx.createRadialGradient(lx, ly, 6, lx, ly, r * 0.85);
+    grad2.addColorStop(0, 'rgba(255, 245, 200, 0.55)');
+    grad2.addColorStop(0.3, 'rgba(255, 230, 170, 0.18)');
+    grad2.addColorStop(1, 'rgba(255, 220, 140, 0)');
+    ctx.fillStyle = grad2;
+    ctx.beginPath();
+    ctx.moveTo(lx, ly);
+    ctx.arc(lx, ly, r * 0.85, beamAngle - BEAM_HALF_WIDTH * 0.55, beamAngle + BEAM_HALF_WIDTH * 0.55);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawLighthouse(elapsed) {
+    const lx = lighthouse.x, ly = lighthouse.y;
+    ctx.save();
+    // base island
+    ctx.beginPath();
+    ctx.ellipse(lx, ly + 28, 56, 14, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(40, 56, 92, 0.85)';
+    ctx.fill();
+    // tower
+    ctx.beginPath();
+    ctx.moveTo(lx - 12, ly + 24);
+    ctx.lineTo(lx + 12, ly + 24);
+    ctx.lineTo(lx + 9, ly - 6);
+    ctx.lineTo(lx - 9, ly - 6);
+    ctx.closePath();
+    ctx.fillStyle = '#e8eef9';
+    ctx.fill();
+    // red stripe
+    ctx.fillStyle = '#d24b56';
+    ctx.fillRect(lx - 11, ly + 6, 22, 6);
+    // lamp room
+    ctx.beginPath();
+    ctx.rect(lx - 8, ly - 10, 16, 6);
+    ctx.fillStyle = '#1a2848';
+    ctx.fill();
+    // glowing lamp
+    const pulse = 0.7 + 0.3 * Math.sin(elapsed * 4);
+    const lampGrad = ctx.createRadialGradient(lx, ly - 7, 1, lx, ly - 7, 14);
+    lampGrad.addColorStop(0, `rgba(255, 245, 200, ${pulse})`);
+    lampGrad.addColorStop(1, 'rgba(255, 245, 200, 0)');
+    ctx.fillStyle = lampGrad;
+    ctx.beginPath();
+    ctx.arc(lx, ly - 7, 14, 0, Math.PI * 2);
+    ctx.fill();
+    // roof
+    ctx.beginPath();
+    ctx.moveTo(lx - 10, ly - 10);
+    ctx.lineTo(lx + 10, ly - 10);
+    ctx.lineTo(lx, ly - 22);
+    ctx.closePath();
+    ctx.fillStyle = '#d24b56';
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawShip(s) {
+    if (s.fade <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = s.fade;
+    ctx.translate(s.x, s.y);
+    ctx.rotate(Math.atan2(s.vy, s.vx) + Math.PI / 2);
+
+    const sz = s.size;
+    const phantom = s.phantom;
+    // hull
+    ctx.beginPath();
+    ctx.moveTo(0, -sz);
+    ctx.lineTo(sz * 0.7, sz * 0.6);
+    ctx.lineTo(-sz * 0.7, sz * 0.6);
+    ctx.closePath();
+    if (phantom) {
+      ctx.fillStyle = '#3a1218';
+      ctx.strokeStyle = '#ff5860';
+    } else {
+      ctx.fillStyle = '#e6efff';
+      ctx.strokeStyle = '#88a4d8';
+    }
+    ctx.lineWidth = 1.2;
+    ctx.fill();
+    ctx.stroke();
+    // sail (small)
+    ctx.beginPath();
+    ctx.moveTo(0, -sz * 0.4);
+    ctx.lineTo(sz * 0.35, sz * 0.2);
+    ctx.lineTo(-sz * 0.05, sz * 0.2);
+    ctx.closePath();
+    ctx.fillStyle = phantom ? '#ff5860' : '#9fd4ff';
+    ctx.globalAlpha = s.fade * 0.9;
+    ctx.fill();
+
+    // progress arc (only for white ships being saved)
+    if (!phantom && s.progress > 0 && !s.saved) {
+      ctx.globalAlpha = s.fade;
+      ctx.strokeStyle = '#ffd27a';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, sz + 6, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * s.progress);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+
+    // wake trail for saved ships
+    if (s.saved) {
+      ctx.save();
+      ctx.globalAlpha = s.fade * 0.5;
+      ctx.fillStyle = '#9fd4ff';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  function drawParticles() {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const p of particles) {
+      const a = 1 - p.age / p.life;
+      ctx.globalAlpha = Math.max(0, a);
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawRipples() {
+    ctx.save();
+    for (const r of ripples) {
+      const a = 1 - r.age / r.life;
+      ctx.globalAlpha = Math.max(0, a) * 0.7;
+      ctx.strokeStyle = r.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function render(elapsed) {
+    ctx.clearRect(0, 0, W, H);
+    drawSea(elapsed);
+    drawBeam();
+    // ships beneath particles
+    for (const s of ships) drawShip(s);
+    drawRipples();
+    drawParticles();
+    drawLighthouse(elapsed);
+  }
+
+  function loop(now) {
+    if (!running) return;
+    if (!lastT) lastT = now;
+    const dt = Math.min(0.05, (now - lastT) / 1000);
+    lastT = now;
+    const elapsed = (now - t0) / 1000;
+    update(dt, elapsed);
+    render(elapsed);
+    requestAnimationFrame(loop);
+  }
+
+  function startGame() {
+    ships = []; particles = []; ripples = [];
+    score = 0; setLives(3);
+    scoreEl.textContent = '0';
+    beamAngle = -Math.PI / 2;
+    targetAngle = -Math.PI / 2;
+    overlay.classList.add('hidden');
+    running = true;
+    t0 = performance.now();
+    lastT = 0;
+    lastSpawn = -1.2; // spawn first ship quickly
+    requestAnimationFrame(loop);
+  }
+
+  function endGame() {
+    running = false;
+    panel.innerHTML = `
+      <h1>END</h1>
+      <p class="sub">霧が晴れた</p>
+      <div class="big">${score}</div>
+      <div class="small">SHIPS SAVED</div>
+      <div class="btn" id="startBtn">もう一度</div>
+      <div class="hint">指でビームを回して船を照らせ</div>
+    `;
+    overlay.classList.remove('hidden');
+    document.getElementById('startBtn').addEventListener('click', startGame);
+    document.getElementById('startBtn').addEventListener('touchstart', (e) => { e.preventDefault(); startGame(); }, { passive: false });
+  }
+
+  startBtn.addEventListener('click', startGame);
+  startBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startGame(); }, { passive: false });
+
+  // initial sizing
+  function init() {
+    resize();
+    // draw a still preview behind overlay
+    render(0);
+  }
+  // wait for layout
+  requestAnimationFrame(() => { init(); requestAnimationFrame(() => init()); });
+  window.addEventListener('orientationchange', () => setTimeout(resize, 200));
+})();
+</script>
+</body>
+</html>
