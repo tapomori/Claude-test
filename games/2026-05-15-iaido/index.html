@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>居合 — Iaido</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: #07060c;
+    color: #e8e6d8;
+    font-family: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #app {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column;
+  }
+  #canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    display: block;
+    touch-action: none;
+    background:
+      radial-gradient(ellipse 80% 60% at 50% 0%, #2a1830 0%, transparent 70%),
+      radial-gradient(ellipse 100% 80% at 50% 100%, #0a0816 0%, transparent 60%),
+      linear-gradient(180deg, #110a1c 0%, #05040a 100%);
+  }
+  .hud {
+    position: absolute; left: 0; right: 0;
+    pointer-events: none;
+    padding: 14px 18px;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 13px;
+    letter-spacing: 3px;
+    color: #b8a890;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+    z-index: 2;
+  }
+  .hud-top { top: env(safe-area-inset-top, 0); }
+  .hud-bot {
+    bottom: env(safe-area-inset-bottom, 0);
+    justify-content: center;
+  }
+  .lives {
+    font-size: 14px;
+    letter-spacing: 6px;
+    color: #d04060;
+  }
+  .lives .off { color: #3a2030; }
+  .score {
+    font-size: 22px;
+    color: #e8d8a0;
+    font-weight: 300;
+    letter-spacing: 2px;
+  }
+  .timer {
+    font-size: 13px;
+    color: #8a7a60;
+  }
+  .back {
+    pointer-events: auto;
+    color: #786850;
+    text-decoration: none;
+    font-size: 12px;
+    letter-spacing: 4px;
+    padding: 6px 12px;
+    border: 1px solid #2a2218;
+    border-radius: 2px;
+    background: rgba(0,0,0,0.3);
+  }
+  .back:active { background: rgba(232,216,160,0.08); }
+  #combo {
+    position: absolute;
+    left: 0; right: 0; top: 30%;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  #combo .num {
+    display: inline-block;
+    font-size: 64px;
+    color: #ff8050;
+    font-weight: 300;
+    text-shadow: 0 0 24px #c83020, 0 0 8px #f86040;
+    opacity: 0;
+    transform: scale(0.6);
+    transition: opacity 0.18s, transform 0.18s;
+  }
+  #combo.show .num { opacity: 1; transform: scale(1); }
+  #combo .kanji {
+    display: block;
+    font-size: 13px;
+    letter-spacing: 8px;
+    color: #f86040;
+    margin-top: 4px;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  #combo.show .kanji { opacity: 0.9; }
+  #overlay {
+    position: absolute; inset: 0;
+    background: linear-gradient(180deg, rgba(8,6,16,0.92) 0%, rgba(8,6,16,0.98) 100%);
+    display: flex; flex-direction: column;
+    justify-content: center; align-items: center;
+    gap: 18px;
+    text-align: center;
+    padding: 24px;
+    z-index: 10;
+    transition: opacity 0.4s;
+  }
+  #overlay.hide {
+    opacity: 0;
+    pointer-events: none;
+  }
+  #overlay h1 {
+    font-size: 56px;
+    letter-spacing: 18px;
+    color: #e8d8a0;
+    font-weight: 300;
+    margin: 0;
+    text-shadow: 0 2px 12px rgba(232,216,160,0.2);
+    padding-left: 18px;
+  }
+  #overlay .sub {
+    color: #786850;
+    font-size: 11px;
+    letter-spacing: 6px;
+    margin-top: -4px;
+    margin-bottom: 12px;
+  }
+  #overlay p {
+    color: #9a8c70;
+    font-size: 14px;
+    line-height: 1.9;
+    max-width: 280px;
+    letter-spacing: 1px;
+  }
+  #overlay .accent { color: #d8b870; }
+  #overlay button {
+    margin-top: 16px;
+    padding: 14px 44px;
+    background: transparent;
+    color: #e8d8a0;
+    border: 1px solid #6a5840;
+    font-family: inherit;
+    font-size: 18px;
+    letter-spacing: 12px;
+    padding-left: 24px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #overlay button:active {
+    background: rgba(232,216,160,0.12);
+    border-color: #c8b070;
+  }
+  .final {
+    font-size: 48px;
+    color: #ff8050;
+    font-weight: 300;
+    letter-spacing: 4px;
+    margin: 8px 0;
+    text-shadow: 0 0 20px rgba(248,96,64,0.4);
+  }
+  .stat {
+    color: #786850;
+    font-size: 12px;
+    letter-spacing: 4px;
+  }
+  .stat b {
+    color: #c8b890;
+    font-weight: normal;
+    margin-left: 8px;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="canvas"></canvas>
+  <div class="hud hud-top">
+    <span class="lives" id="lives">●●●</span>
+    <span class="score" id="score">0</span>
+    <span class="timer" id="timer">60</span>
+  </div>
+  <div id="combo"><span class="num"></span><span class="kanji">一閃</span></div>
+  <div class="hud hud-bot">
+    <a class="back" href="../../index.html">← 戻る</a>
+  </div>
+  <div id="overlay">
+    <h1>居合</h1>
+    <div class="sub">I A I D O</div>
+    <p>流れる短冊に刻まれた<br><span class="accent">薄い斬り線</span>に沿って指を走らせ、<br>一息で斬り抜けよ。</p>
+    <p style="font-size:12px; color:#5a4d38;">同じ一筆で複数本を斬れば連。<br>逃せば命が一つ削れる。</p>
+    <button id="startBtn">抜　刀</button>
+  </div>
+</div>
+<script>
+(() => {
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const ui = {
+    lives: document.getElementById('lives'),
+    score: document.getElementById('score'),
+    timer: document.getElementById('timer'),
+    combo: document.getElementById('combo'),
+    comboNum: document.querySelector('#combo .num'),
+    overlay: document.getElementById('overlay'),
+    startBtn: document.getElementById('startBtn'),
+  };
+
+  let W = 0, H = 0, DPR = 1;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2.5);
+    W = canvas.clientWidth = window.innerWidth;
+    H = canvas.clientHeight = window.innerHeight;
+    canvas.width = Math.round(W * DPR);
+    canvas.height = Math.round(H * DPR);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', () => setTimeout(resize, 100));
+
+  // ---- state ----
+  let targets = [];
+  let particles = [];
+  let trail = [];
+  let petals = [];
+  let stroke = null;
+  let lives = 3;
+  let score = 0;
+  let combo = 0;
+  let bestCombo = 0;
+  let cuts = 0;
+  let timeLeft = 60;
+  let elapsed = 0;
+  let lastSpawn = 0;
+  let running = false;
+  let lastT = 0;
+  let shakeT = 0;
+  let flashT = 0;
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+
+  function spawnPetals(n) {
+    for (let i = 0; i < n; i++) {
+      petals.push({
+        x: rand(0, W),
+        y: rand(-H, H),
+        vx: rand(-12, 12),
+        vy: rand(20, 50),
+        r: rand(2, 5),
+        rot: rand(0, Math.PI * 2),
+        vr: rand(-1, 1),
+        hue: rand(330, 360),
+        alpha: rand(0.15, 0.45),
+      });
+    }
+  }
+
+  function spawnTarget() {
+    const fromLeft = Math.random() > 0.5;
+    const margin = 100;
+    const y = rand(margin, H - margin - 60);
+    const diff = Math.min(1, elapsed / 50);
+    const speed = rand(70, 110) + diff * 90;
+    const angle = (Math.random() - 0.5) * (Math.PI * 0.9);
+    const size = rand(26, 36);
+    targets.push({
+      x: fromLeft ? -50 : W + 50,
+      y,
+      vx: fromLeft ? speed : -speed,
+      vy: rand(-15, 15),
+      angle,
+      size,
+      hue: rand(20, 55),
+      alive: true,
+      cut: false,
+      cutT: 0,
+      cutAngle: 0,
+      shimmer: rand(0, Math.PI * 2),
+    });
+  }
+
+  function spawnParticles(x, y, hue, count = 14, speed = 1) {
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const v = rand(80, 240) * speed;
+      particles.push({
+        x, y,
+        vx: Math.cos(a) * v,
+        vy: Math.sin(a) * v - rand(20, 60),
+        life: rand(0.45, 0.9),
+        age: 0,
+        hue,
+        size: rand(1.5, 3),
+      });
+    }
+  }
+
+  // [-PI/2, PI/2] symmetric angle diff (line direction, not vector)
+  function angleDiff(a, b) {
+    let d = a - b;
+    while (d > Math.PI / 2) d -= Math.PI;
+    while (d < -Math.PI / 2) d += Math.PI;
+    return Math.abs(d);
+  }
+
+  function segCircle(x1, y1, x2, y2, cx, cy, r) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const fx = x1 - cx, fy = y1 - cy;
+    const a = dx * dx + dy * dy;
+    if (a < 0.0001) return (fx * fx + fy * fy) <= r * r;
+    const b = 2 * (fx * dx + fy * dy);
+    const c = fx * fx + fy * fy - r * r;
+    const disc = b * b - 4 * a * c;
+    if (disc < 0) return false;
+    const sq = Math.sqrt(disc);
+    const t1 = (-b - sq) / (2 * a);
+    const t2 = (-b + sq) / (2 * a);
+    return (t1 >= 0 && t1 <= 1) || (t2 >= 0 && t2 <= 1) || (t1 < 0 && t2 > 1);
+  }
+
+  function getPoint(e) {
+    const rect = canvas.getBoundingClientRect();
+    let cx, cy;
+    if (e.touches && e.touches[0]) {
+      cx = e.touches[0].clientX; cy = e.touches[0].clientY;
+    } else {
+      cx = e.clientX; cy = e.clientY;
+    }
+    return { x: cx - rect.left, y: cy - rect.top };
+  }
+
+  function pointerStart(e) {
+    if (!running) return;
+    e.preventDefault();
+    const p = getPoint(e);
+    stroke = { last: p, hit: new Set() };
+    trail.length = 0;
+    trail.push({ x: p.x, y: p.y, age: 0 });
+  }
+  function pointerMove(e) {
+    if (!stroke || !running) return;
+    e.preventDefault();
+    const p = getPoint(e);
+    const last = stroke.last;
+    const dx = p.x - last.x, dy = p.y - last.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 3) return;
+    const segAngle = Math.atan2(dy, dx);
+    // Check intersections with alive targets
+    for (const t of targets) {
+      if (!t.alive || stroke.hit.has(t)) continue;
+      if (segCircle(last.x, last.y, p.x, p.y, t.x, t.y, t.size * 0.95)) {
+        stroke.hit.add(t);
+        const aDiff = angleDiff(segAngle, t.angle);
+        if (aDiff < 0.42 && dist > 5) {
+          // CLEAN cut
+          t.alive = false;
+          t.cut = true;
+          t.cutT = 0;
+          t.cutAngle = segAngle;
+          combo++;
+          cuts++;
+          if (combo > bestCombo) bestCombo = combo;
+          const precisionBonus = Math.floor((0.42 - aDiff) / 0.42 * 80);
+          const points = 100 + combo * 40 + precisionBonus;
+          score += points;
+          spawnParticles(t.x, t.y, t.hue, 16);
+          spawnParticles(t.x, t.y, 50, 6, 0.4);
+          flashT = 0.18;
+          showCombo(combo);
+          if (navigator.vibrate) navigator.vibrate(combo > 1 ? 25 : 18);
+        } else {
+          // glancing — target destroyed, no points, combo reset
+          t.alive = false;
+          t.cut = false;
+          t.cutT = 0;
+          combo = 0;
+          spawnParticles(t.x, t.y, 0, 8, 0.6);
+          if (navigator.vibrate) navigator.vibrate([8, 30, 8]);
+        }
+      }
+    }
+    stroke.last = p;
+    trail.push({ x: p.x, y: p.y, age: 0 });
+    if (trail.length > 40) trail.shift();
+  }
+  function pointerEnd(e) {
+    if (e) e.preventDefault();
+    stroke = null;
+  }
+
+  canvas.addEventListener('pointerdown', pointerStart);
+  canvas.addEventListener('pointermove', pointerMove);
+  canvas.addEventListener('pointerup', pointerEnd);
+  canvas.addEventListener('pointercancel', pointerEnd);
+  canvas.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+  canvas.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  let comboTimer = null;
+  function showCombo(n) {
+    if (n < 2) return;
+    ui.comboNum.textContent = '×' + n;
+    ui.combo.classList.remove('show');
+    void ui.combo.offsetWidth;
+    ui.combo.classList.add('show');
+    clearTimeout(comboTimer);
+    comboTimer = setTimeout(() => ui.combo.classList.remove('show'), 600);
+  }
+
+  function start() {
+    targets.length = 0;
+    particles.length = 0;
+    trail.length = 0;
+    petals.length = 0;
+    spawnPetals(24);
+    lives = 3;
+    score = 0;
+    combo = 0;
+    bestCombo = 0;
+    cuts = 0;
+    timeLeft = 60;
+    elapsed = 0;
+    lastSpawn = 0.6;
+    running = true;
+    flashT = 0;
+    shakeT = 0;
+    lastT = performance.now();
+    ui.overlay.classList.add('hide');
+    ui.combo.classList.remove('show');
+    updateHud();
+    requestAnimationFrame(loop);
+  }
+
+  function end() {
+    running = false;
+    setTimeout(() => {
+      const h = ui.overlay.querySelector('h1');
+      const subDiv = ui.overlay.querySelector('.sub');
+      const ps = ui.overlay.querySelectorAll('p');
+      h.textContent = '残心';
+      subDiv.textContent = 'Z A N S H I N';
+      ps[0].innerHTML = `<div class="final">${score}</div>`;
+      ps[1].innerHTML =
+        `<div class="stat">斬 数 <b>${cuts}</b></div>` +
+        `<div class="stat">最 連 <b>×${Math.max(bestCombo, 1)}</b></div>`;
+      ui.startBtn.textContent = '再 戦';
+      ui.overlay.classList.remove('hide');
+    }, 600);
+  }
+
+  ui.startBtn.addEventListener('click', start);
+
+  function updateHud() {
+    ui.score.textContent = score;
+    ui.timer.textContent = Math.ceil(timeLeft);
+    let s = '';
+    for (let i = 0; i < 3; i++) {
+      s += i < lives ? '●' : '<span class="off">●</span>';
+    }
+    ui.lives.innerHTML = s;
+  }
+
+  function loop(t) {
+    if (!running) return;
+    const dt = Math.min(0.05, (t - lastT) / 1000);
+    lastT = t;
+    elapsed += dt;
+    timeLeft -= dt;
+    if (timeLeft <= 0) {
+      timeLeft = 0;
+      updateHud();
+      end();
+      return;
+    }
+
+    // spawn
+    lastSpawn -= dt;
+    const diff = Math.min(1, elapsed / 50);
+    const minInt = 0.45;
+    const maxInt = 1.5 - diff * 0.8;
+    if (lastSpawn <= 0) {
+      spawnTarget();
+      // occasionally spawn twice for tougher pairs
+      if (diff > 0.4 && Math.random() < 0.18 + diff * 0.2) {
+        setTimeout(() => running && spawnTarget(), 120);
+      }
+      lastSpawn = rand(minInt, Math.max(minInt + 0.1, maxInt));
+    }
+
+    // targets update
+    for (const tg of targets) {
+      if (tg.alive) {
+        tg.x += tg.vx * dt;
+        tg.y += tg.vy * dt;
+        tg.shimmer += dt * 3;
+        if (tg.x < -90 || tg.x > W + 90) {
+          tg.alive = false;
+          tg.missed = true;
+          tg.cutT = 0;
+          if (lives > 0) {
+            lives--;
+            shakeT = 0.3;
+            combo = 0;
+            if (navigator.vibrate) navigator.vibrate(80);
+            updateHud();
+            if (lives <= 0) {
+              updateHud();
+              end();
+              return;
+            }
+          }
+        }
+      } else {
+        tg.cutT += dt;
+      }
+    }
+    targets = targets.filter(tg => tg.alive || tg.cutT < 0.9);
+
+    // particles
+    for (const p of particles) {
+      p.age += dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 320 * dt;
+      p.vx *= 0.96;
+    }
+    particles = particles.filter(p => p.age < p.life);
+
+    // petals (background)
+    for (const pt of petals) {
+      pt.x += pt.vx * dt;
+      pt.y += pt.vy * dt;
+      pt.rot += pt.vr * dt;
+      pt.vx += Math.sin((t / 1000 + pt.y * 0.01)) * 4 * dt;
+      if (pt.y > H + 10) { pt.y = -10; pt.x = rand(0, W); }
+      if (pt.x < -10) pt.x = W + 10;
+      if (pt.x > W + 10) pt.x = -10;
+    }
+
+    // trail age
+    for (const tr of trail) tr.age += dt;
+    while (trail.length && trail[0].age > 0.32) trail.shift();
+
+    if (shakeT > 0) shakeT -= dt;
+    if (flashT > 0) flashT -= dt;
+
+    draw();
+    updateHud();
+    requestAnimationFrame(loop);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    // screen shake
+    let sx = 0, sy = 0;
+    if (shakeT > 0) {
+      const k = shakeT / 0.3 * 8;
+      sx = (Math.random() - 0.5) * k;
+      sy = (Math.random() - 0.5) * k;
+    }
+    ctx.save();
+    ctx.translate(sx, sy);
+
+    // background petals
+    for (const pt of petals) {
+      ctx.save();
+      ctx.translate(pt.x, pt.y);
+      ctx.rotate(pt.rot);
+      ctx.fillStyle = `hsla(${pt.hue}, 70%, 75%, ${pt.alpha})`;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, pt.r * 1.4, pt.r * 0.7, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // targets
+    for (const t of targets) {
+      ctx.save();
+      ctx.translate(t.x, t.y);
+      ctx.rotate(t.angle);
+
+      if (t.alive) {
+        const w = t.size * 2.2;
+        const h = t.size * 0.85;
+        const shimmer = 0.85 + Math.sin(t.shimmer) * 0.12;
+
+        // shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(-w / 2 + 3, -h / 2 + 4, w, h);
+
+        // tanzaku body — gradient
+        const grad = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
+        grad.addColorStop(0, `hsl(${t.hue}, 60%, ${78 * shimmer}%)`);
+        grad.addColorStop(0.5, `hsl(${t.hue + 5}, 55%, ${68 * shimmer}%)`);
+        grad.addColorStop(1, `hsl(${t.hue - 5}, 50%, ${52 * shimmer}%)`);
+        ctx.fillStyle = grad;
+        ctx.fillRect(-w / 2, -h / 2, w, h);
+
+        // edge
+        ctx.strokeStyle = `hsla(${t.hue - 10}, 60%, 35%, 0.8)`;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(-w / 2, -h / 2, w, h);
+
+        // ink character
+        ctx.fillStyle = `hsla(${t.hue - 15}, 70%, 15%, 0.85)`;
+        ctx.fillRect(-w / 6, -h / 3.2, w / 14, h * 0.65);
+        ctx.fillRect(-w / 6 - 2, -h / 3.2, w / 5, h / 12);
+        ctx.fillRect(-w / 12, h / 6, w / 8, h / 12);
+
+        // ribbon ends
+        ctx.fillStyle = `hsla(${t.hue + 15}, 60%, 45%, 0.9)`;
+        ctx.beginPath();
+        ctx.moveTo(-w / 2, -h / 2);
+        ctx.lineTo(-w / 2 - 8, 0);
+        ctx.lineTo(-w / 2, h / 2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(w / 2, -h / 2);
+        ctx.lineTo(w / 2 + 8, 0);
+        ctx.lineTo(w / 2, h / 2);
+        ctx.closePath();
+        ctx.fill();
+
+        // cut line hint (horizontal in local frame == t.angle in world frame)
+        ctx.strokeStyle = 'rgba(255, 250, 220, 0.55)';
+        ctx.setLineDash([4, 5]);
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(-w / 2 - 14, 0);
+        ctx.lineTo(w / 2 + 14, 0);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // accent dot at start
+        ctx.fillStyle = 'rgba(255, 220, 140, 0.9)';
+        ctx.beginPath();
+        ctx.arc(-w / 2 - 14, 0, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (t.cut) {
+        // clean cut: two halves separate along cutAngle (drawn in target's local frame)
+        const tt = t.cutT;
+        const fade = Math.max(0, 1 - tt / 0.9);
+        const w = t.size * 2.2;
+        const h = t.size * 0.85;
+        ctx.globalAlpha = fade;
+        const off = tt * 50;
+        const drift = tt * 30;
+
+        // top half (drift up & rotate)
+        ctx.save();
+        ctx.translate(0, -off - drift * 0.3);
+        ctx.rotate(-tt * 0.6);
+        const g1 = ctx.createLinearGradient(0, -h / 2, 0, 0);
+        g1.addColorStop(0, `hsl(${t.hue}, 60%, 78%)`);
+        g1.addColorStop(1, `hsl(${t.hue + 5}, 55%, 65%)`);
+        ctx.fillStyle = g1;
+        ctx.fillRect(-w / 2, -h / 2, w, h / 2);
+        ctx.fillStyle = `hsla(${t.hue - 15}, 70%, 15%, 0.85)`;
+        ctx.fillRect(-w / 6, -h / 3.2, w / 14, h * 0.3);
+        ctx.restore();
+
+        // bottom half
+        ctx.save();
+        ctx.translate(0, off + drift * 0.3);
+        ctx.rotate(tt * 0.6);
+        const g2 = ctx.createLinearGradient(0, 0, 0, h / 2);
+        g2.addColorStop(0, `hsl(${t.hue + 5}, 55%, 65%)`);
+        g2.addColorStop(1, `hsl(${t.hue - 5}, 50%, 52%)`);
+        ctx.fillStyle = g2;
+        ctx.fillRect(-w / 2, 0, w, h / 2);
+        ctx.fillStyle = `hsla(${t.hue - 15}, 70%, 15%, 0.85)`;
+        ctx.fillRect(-w / 12, h / 6, w / 8, h / 12);
+        ctx.restore();
+
+        // slash gleam
+        if (tt < 0.25) {
+          const gleam = (1 - tt / 0.25);
+          ctx.strokeStyle = `rgba(255, 240, 200, ${gleam})`;
+          ctx.lineWidth = 2 + gleam * 4;
+          ctx.shadowColor = '#fff0c0';
+          ctx.shadowBlur = 20 * gleam;
+          ctx.beginPath();
+          ctx.moveTo(-w / 2 - 20, 0);
+          ctx.lineTo(w / 2 + 20, 0);
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        }
+      } else {
+        // glancing miss — red ring pulse
+        const tt = t.cutT;
+        const fade = Math.max(0, 1 - tt / 0.5);
+        if (fade > 0) {
+          ctx.globalAlpha = fade;
+          ctx.strokeStyle = '#ff5070';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(0, 0, t.size * 0.6 + tt * 50, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    }
+
+    // particles
+    for (const p of particles) {
+      const a = Math.max(0, 1 - p.age / p.life);
+      ctx.fillStyle = `hsla(${p.hue}, 85%, 70%, ${a})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * (0.5 + a * 0.8), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // trail (sword arc)
+    if (trail.length > 1) {
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      for (let i = 1; i < trail.length; i++) {
+        const tr = trail[i];
+        const a = Math.max(0, 1 - tr.age / 0.32);
+        const w = (i / trail.length) * 10 + 1.5;
+        ctx.strokeStyle = `rgba(255, 245, 215, ${a * 0.85})`;
+        ctx.lineWidth = w;
+        ctx.shadowColor = '#fff0c0';
+        ctx.shadowBlur = 12 * a;
+        ctx.beginPath();
+        ctx.moveTo(trail[i - 1].x, trail[i - 1].y);
+        ctx.lineTo(tr.x, tr.y);
+        ctx.stroke();
+      }
+      ctx.shadowBlur = 0;
+    }
+
+    // flash overlay
+    if (flashT > 0) {
+      ctx.fillStyle = `rgba(255, 240, 200, ${flashT * 0.3})`;
+      ctx.fillRect(-sx, -sy, W, H);
+    }
+
+    ctx.restore();
+  }
+
+  // boot
+  resize();
+  spawnPetals(24);
+  // gentle idle render so opening screen isn't pure black
+  function idle() {
+    if (running) return;
+    for (const pt of petals) {
+      pt.x += pt.vx * 0.016;
+      pt.y += pt.vy * 0.016;
+      pt.rot += pt.vr * 0.016;
+      if (pt.y > H + 10) { pt.y = -10; pt.x = rand(0, W); }
+      if (pt.x < -10) pt.x = W + 10;
+      if (pt.x > W + 10) pt.x = -10;
+    }
+    ctx.clearRect(0, 0, W, H);
+    for (const pt of petals) {
+      ctx.save();
+      ctx.translate(pt.x, pt.y);
+      ctx.rotate(pt.rot);
+      ctx.fillStyle = `hsla(${pt.hue}, 70%, 75%, ${pt.alpha})`;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, pt.r * 1.4, pt.r * 0.7, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    requestAnimationFrame(idle);
+  }
+  idle();
+})();
+</script>
+</body>
+</html>
