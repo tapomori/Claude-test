@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0613">
+<title>もちつき / Mochi-tsuki</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: #0a0613;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+    color: #f8e6c0;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none; -webkit-user-select: none;
+    overscroll-behavior: none;
+  }
+  #wrap { position: absolute; inset: 0; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .hud {
+    position: absolute; top: 14px; left: 14px; right: 14px;
+    display: flex; justify-content: space-between; align-items: center;
+    z-index: 5; pointer-events: none;
+    font-variant-numeric: tabular-nums;
+  }
+  .score { font-size: 30px; font-weight: 800; letter-spacing: 1px; text-shadow: 0 0 14px #ffb060; }
+  .lives { font-size: 22px; letter-spacing: 3px; }
+  .lives .dim { opacity: 0.18; }
+  .back {
+    position: absolute; top: 18px; left: 50%;
+    transform: translateX(-50%);
+    color: #f8e6c0; opacity: 0.5; font-size: 12px;
+    text-decoration: none; z-index: 6;
+    pointer-events: auto; letter-spacing: 1px;
+  }
+  .combo {
+    position: absolute; top: 80px; left: 50%;
+    transform: translateX(-50%) scale(0.7);
+    font-size: 22px; font-weight: 800;
+    color: #ffd58a; text-shadow: 0 0 14px #ff8030;
+    opacity: 0; transition: opacity 0.2s, transform 0.2s;
+    z-index: 5; pointer-events: none;
+    white-space: nowrap;
+  }
+  .combo.show { opacity: 1; transform: translateX(-50%) scale(1); }
+  .center-msg {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    z-index: 10; text-align: center; padding: 24px;
+    background: radial-gradient(circle at 50% 60%, rgba(40,16,10,0.55), rgba(8,4,12,0.92));
+    backdrop-filter: blur(2px);
+  }
+  .center-msg h1 {
+    font-size: 42px; margin-bottom: 14px;
+    color: #ffd58a; text-shadow: 0 0 24px #ff8030;
+    letter-spacing: 4px;
+  }
+  .center-msg p {
+    font-size: 15px; line-height: 1.8; opacity: 0.88;
+    max-width: 300px;
+  }
+  .center-msg .small { font-size: 12px; opacity: 0.55; margin-top: 14px; }
+  .center-msg button {
+    margin-top: 32px; padding: 14px 40px;
+    font-size: 17px; font-weight: 700; letter-spacing: 2px;
+    background: linear-gradient(180deg, #e08a3a, #b65a18);
+    color: #fff8e8;
+    border: none; border-radius: 30px;
+    box-shadow: 0 0 28px rgba(255,128,48,0.45), inset 0 -3px 0 rgba(0,0,0,0.25);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .center-msg button:active { transform: translateY(1px); box-shadow: 0 0 18px rgba(255,128,48,0.45), inset 0 -1px 0 rgba(0,0,0,0.25); }
+  #over { display: none; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="cv"></canvas>
+  <a class="back" href="../../index.html">← gallery</a>
+  <div class="hud">
+    <div class="score" id="score">0</div>
+    <div class="lives" id="lives">♡♡♡</div>
+  </div>
+  <div class="combo" id="combo"></div>
+  <div class="center-msg" id="start">
+    <h1>もちつき</h1>
+    <p>手が引っ込んだ瞬間に<br>タップして杵を振り下ろせ。<br>手が入っているときに叩くな。</p>
+    <button id="startBtn">はじめる</button>
+    <p class="small">緑のリングが安全帯</p>
+  </div>
+  <div class="center-msg" id="over">
+    <h1 id="overTitle">おしまい</h1>
+    <p id="overScore"></p>
+    <button id="retryBtn">もう一回</button>
+  </div>
+</div>
+<script>
+(() => {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  let W = 0, H = 0, DPR = 1;
+
+  function resize() {
+    DPR = window.devicePixelRatio || 1;
+    W = window.innerWidth;
+    H = window.innerHeight;
+    cv.width = Math.floor(W * DPR);
+    cv.height = Math.floor(H * DPR);
+    cv.style.width = W + 'px';
+    cv.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // roundRect polyfill
+  if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+      const rr = typeof r === 'number' ? [r,r,r,r] : r;
+      this.beginPath();
+      this.moveTo(x + rr[0], y);
+      this.lineTo(x + w - rr[1], y);
+      this.quadraticCurveTo(x + w, y, x + w, y + rr[1]);
+      this.lineTo(x + w, y + h - rr[2]);
+      this.quadraticCurveTo(x + w, y + h, x + w - rr[2], y + h);
+      this.lineTo(x + rr[3], y + h);
+      this.quadraticCurveTo(x, y + h, x, y + h - rr[3]);
+      this.lineTo(x, y + rr[0]);
+      this.quadraticCurveTo(x, y, x + rr[0], y);
+      return this;
+    };
+  }
+
+  const scoreEl = document.getElementById('score');
+  const livesEl = document.getElementById('lives');
+  const comboEl = document.getElementById('combo');
+  const startScreen = document.getElementById('start');
+  const overScreen = document.getElementById('over');
+  const overScoreEl = document.getElementById('overScore');
+  const overTitleEl = document.getElementById('overTitle');
+  const startBtn = document.getElementById('startBtn');
+  const retryBtn = document.getElementById('retryBtn');
+
+  let state = 'start';
+  let score = 0, lives = 3, combo = 0, bestCombo = 0;
+  let mochiSize = 1;
+  let mochiShine = 0;
+  let cycleT = 0;
+  let cycleSpeed = 0.85;
+  let mallet = { y: 0, vy: 0, swinging: false, returning: false };
+  let particles = [];
+  let blob = [];
+  let flash = 0;
+  let lastTapResult = null;
+  let popupText = null; // { text, t, color }
+  let shake = 0;
+
+  // Hand: enters/exits the mortar over the cycle.
+  // 0..0.15 : entering (right -> center)
+  // 0.15..0.40 : fully inside (folding mochi)
+  // 0.40..0.55 : exiting
+  // 0.55..1.0 : safely out
+  function handPosition(t) {
+    if (t < 0.15) return t / 0.15;
+    if (t < 0.40) return 1;
+    if (t < 0.55) return 1 - (t - 0.40) / 0.15;
+    return 0;
+  }
+  function isHandSafe(t) { return t >= 0.62 && t <= 0.98; }
+
+  function spawnParticles(x, y, n, kind) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI - Math.PI;
+      const sp = 2 + Math.random() * 4;
+      particles.push({
+        x, y,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp - 1,
+        life: 1,
+        decay: 0.018 + Math.random() * 0.022,
+        size: 2 + Math.random() * 3,
+        kind
+      });
+    }
+  }
+
+  function vibrate(p) { if (navigator.vibrate) try { navigator.vibrate(p); } catch(e){} }
+
+  function startGame() {
+    state = 'play';
+    score = 0; lives = 3; combo = 0; bestCombo = 0;
+    mochiSize = 1; mochiShine = 0;
+    cycleT = 0; cycleSpeed = 0.85;
+    mallet.swinging = false; mallet.returning = false; mallet.y = 0; mallet.vy = 0;
+    particles = []; blob = [];
+    flash = 0; popupText = null; shake = 0;
+    updateHUD();
+    startScreen.style.display = 'none';
+    overScreen.style.display = 'none';
+  }
+
+  function gameOver() {
+    state = 'over';
+    overTitleEl.textContent = lives <= 0 ? 'おしまい' : 'おしまい';
+    overScoreEl.innerHTML = `スコア <b style="color:#ffd58a;font-size:1.4em">${score}</b><br><span style="opacity:0.7">最大コンボ ${bestCombo}</span>`;
+    overScreen.style.display = 'flex';
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    let html = '';
+    for (let i = 0; i < 3; i++) {
+      html += i < lives ? '♡' : '<span class="dim">♡</span>';
+    }
+    livesEl.innerHTML = html;
+  }
+
+  function showCombo(n) {
+    if (n < 2) return;
+    comboEl.textContent = `× ${n}`;
+    comboEl.classList.remove('show');
+    void comboEl.offsetWidth;
+    comboEl.classList.add('show');
+    clearTimeout(showCombo._t);
+    showCombo._t = setTimeout(() => comboEl.classList.remove('show'), 700);
+  }
+
+  function showPopup(text, color) {
+    popupText = { text, t: 1, color };
+  }
+
+  function tap() {
+    if (state !== 'play') return;
+    if (mallet.swinging || mallet.returning) return;
+    const t = cycleT;
+    const safe = isHandSafe(t);
+    if (!safe) {
+      // BAD: hand was in mortar
+      lives--;
+      combo = 0;
+      flash = 1;
+      shake = 14;
+      lastTapResult = 'bad';
+      mallet.swinging = true; mallet.vy = 12;
+      vibrate([50, 30, 80]);
+      showPopup('!!', '#ff5050');
+      updateHUD();
+      if (lives <= 0) {
+        setTimeout(gameOver, 700);
+      }
+    } else {
+      // GOOD
+      const ideal = 0.80;
+      const dist = Math.abs(t - ideal);
+      const quality = Math.max(0, 1 - dist / 0.18);
+      const isPerfect = quality > 0.7;
+      const points = Math.round(10 + quality * 20) + combo * 2;
+      score += points;
+      combo++;
+      if (combo > bestCombo) bestCombo = combo;
+      mochiSize = Math.min(2.0, mochiSize + 0.035);
+      mochiShine = Math.min(1, mochiShine + 0.05);
+      lastTapResult = isPerfect ? 'perfect' : 'good';
+      mallet.swinging = true; mallet.vy = 14 + quality * 6;
+      flash = 0.5;
+      vibrate(isPerfect ? 25 : 15);
+      cycleSpeed = Math.min(1.95, cycleSpeed + 0.018);
+      updateHUD();
+      showCombo(combo);
+      showPopup(isPerfect ? `+${points}!` : `+${points}`, isPerfect ? '#ffe098' : '#fff0c8');
+    }
+  }
+
+  cv.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    tap();
+  }, { passive: false });
+  document.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  startBtn.addEventListener('click', startGame);
+  retryBtn.addEventListener('click', startGame);
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    if (state === 'play') {
+      cycleT += cycleSpeed * dt;
+      while (cycleT >= 1) cycleT -= 1;
+      if (mallet.swinging) {
+        mallet.y += mallet.vy;
+        mallet.vy += 1.6;
+        if (mallet.y > H * 0.32) {
+          mallet.swinging = false;
+          mallet.returning = true;
+          if (lastTapResult !== 'bad') {
+            const cx = W / 2, cy = H * 0.755;
+            spawnParticles(cx, cy - 10, 22, 'flour');
+            spawnParticles(cx, cy - 18, 8, 'steam');
+            blob.push({ phase: 0 });
+            shake = 6;
+          } else {
+            spawnParticles(W/2, H*0.755 - 10, 16, 'red');
+            shake = 12;
+          }
+        }
+      } else if (mallet.returning) {
+        mallet.y -= 9;
+        if (mallet.y <= 0) { mallet.y = 0; mallet.returning = false; }
+      }
+      for (const p of particles) {
+        p.x += p.vx; p.y += p.vy;
+        p.vy += p.kind === 'steam' ? -0.05 : 0.18;
+        p.vx *= 0.99;
+        p.life -= p.decay;
+      }
+      particles = particles.filter(p => p.life > 0);
+      for (const b of blob) b.phase += dt * 4.5;
+      blob = blob.filter(b => b.phase < 1);
+      flash = Math.max(0, flash - dt * 2);
+      if (popupText) {
+        popupText.t -= dt * 1.4;
+        if (popupText.t <= 0) popupText = null;
+      }
+      shake = Math.max(0, shake - dt * 60);
+    }
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  function draw() {
+    ctx.save();
+    if (shake > 0) {
+      const sx = (Math.random() - 0.5) * shake;
+      const sy = (Math.random() - 0.5) * shake;
+      ctx.translate(sx, sy);
+    }
+    ctx.clearRect(-30, -30, W + 60, H + 60);
+    drawBackground();
+    drawMortar();
+    drawMochi();
+    drawHand();
+    drawMallet();
+    drawParticles();
+    drawTimingArc();
+    drawPopup();
+    if (flash > 0) {
+      ctx.fillStyle = lastTapResult === 'bad'
+        ? `rgba(220,40,40,${flash * 0.45})`
+        : `rgba(255,200,120,${flash * 0.16})`;
+      ctx.fillRect(-30, -30, W + 60, H + 60);
+    }
+    ctx.restore();
+  }
+
+  function drawBackground() {
+    const bg = ctx.createRadialGradient(W/2, H*0.7, 50, W/2, H*0.6, Math.max(W, H));
+    bg.addColorStop(0, '#3a1a08');
+    bg.addColorStop(0.45, '#1a0a14');
+    bg.addColorStop(1, '#06030a');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+    // floor glow
+    ctx.fillStyle = 'rgba(255,150,60,0.07)';
+    ctx.beginPath();
+    ctx.ellipse(W/2, H*0.86, W*0.55, 36, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // embers
+    const t = performance.now() / 1000;
+    for (let i = 0; i < 6; i++) {
+      const x = W * (0.1 + 0.8 * ((i * 0.37 + t * 0.05) % 1));
+      const y = H * (0.95 - ((t * 0.15 + i * 0.2) % 1) * 0.5);
+      const a = 0.4 * (1 - ((t * 0.15 + i * 0.2) % 1));
+      ctx.fillStyle = `rgba(255,160,80,${a})`;
+      ctx.beginPath();
+      ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawMortar() {
+    const cx = W / 2;
+    const cy = H * 0.78;
+    const rw = Math.min(W * 0.42, 230);
+    const rh = rw * 0.95;
+    // Body
+    const bodyGrad = ctx.createLinearGradient(cx - rw, cy, cx + rw, cy);
+    bodyGrad.addColorStop(0, '#1c0c04');
+    bodyGrad.addColorStop(0.5, '#3a1c0a');
+    bodyGrad.addColorStop(1, '#1c0c04');
+    ctx.fillStyle = bodyGrad;
+    ctx.beginPath();
+    ctx.moveTo(cx - rw, cy - rh * 0.2);
+    ctx.bezierCurveTo(cx - rw * 1.05, cy + rh * 0.7, cx - rw * 0.7, cy + rh, cx, cy + rh);
+    ctx.bezierCurveTo(cx + rw * 0.7, cy + rh, cx + rw * 1.05, cy + rh * 0.7, cx + rw, cy - rh * 0.2);
+    ctx.closePath();
+    ctx.fill();
+    // Wood grain
+    ctx.strokeStyle = 'rgba(120,60,25,0.3)';
+    ctx.lineWidth = 1.2;
+    for (let i = 0; i < 4; i++) {
+      ctx.beginPath();
+      ctx.ellipse(cx, cy + 30 + i * 18, rw - 8 - i * 10, rh * 0.5 - i * 6, 0, 0.15, Math.PI - 0.15);
+      ctx.stroke();
+    }
+    // Rim
+    ctx.fillStyle = '#4a2410';
+    ctx.beginPath();
+    ctx.ellipse(cx, cy - rh * 0.18, rw, rh * 0.28, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Inside (dark)
+    ctx.fillStyle = '#0a0402';
+    ctx.beginPath();
+    ctx.ellipse(cx, cy - rh * 0.16, rw * 0.86, rh * 0.22, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Inner rim shadow
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy - rh * 0.16, rw * 0.86, rh * 0.22, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  function drawMochi() {
+    const cx = W / 2;
+    const cy = H * 0.755;
+    const baseR = 36 + (mochiSize - 1) * 30;
+    let squish = 0;
+    for (const b of blob) squish = Math.max(squish, Math.sin(b.phase * Math.PI) * 0.4);
+    const rx = baseR * (1 + squish * 0.35);
+    const ry = baseR * (1 - squish * 0.55);
+    const grad = ctx.createRadialGradient(cx - rx * 0.2, cy - ry * 0.3, 0, cx, cy, rx * 1.4);
+    grad.addColorStop(0, `rgba(255,253,248,${0.85 + mochiShine * 0.15})`);
+    grad.addColorStop(0.55, 'rgba(252,238,222,0.98)');
+    grad.addColorStop(1, 'rgba(210,188,170,1)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Highlight
+    ctx.fillStyle = `rgba(255,255,255,${0.3 + mochiShine * 0.5})`;
+    ctx.beginPath();
+    ctx.ellipse(cx - rx * 0.3, cy - ry * 0.4, rx * 0.35, ry * 0.18, -0.4, 0, Math.PI * 2);
+    ctx.fill();
+    // Subtle outer glow when shiny
+    if (mochiShine > 0.3) {
+      ctx.shadowColor = `rgba(255,230,180,${mochiShine * 0.35})`;
+      ctx.shadowBlur = 18;
+      ctx.strokeStyle = `rgba(255,240,210,${mochiShine * 0.1})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  function drawHand() {
+    if (state !== 'play') return;
+    const cx = W / 2;
+    const cy = H * 0.755;
+    const pos = handPosition(cycleT);
+    if (pos < 0.02) return;
+    const startX = cx + W * 0.5;
+    const startY = cy - 26;
+    const endX = cx;
+    const endY = cy - 14;
+    const x = startX + (endX - startX) * pos;
+    const y = startY + (endY - startY) * pos;
+    // Sleeve
+    ctx.fillStyle = '#5a2818';
+    ctx.beginPath();
+    ctx.roundRect(startX, startY - 22, W * 0.5, 38, [4, 0, 0, 8]);
+    ctx.fill();
+    // Sleeve cuff
+    ctx.fillStyle = '#7a3a22';
+    ctx.beginPath();
+    ctx.roundRect(startX - 6, startY - 24, 14, 42, 4);
+    ctx.fill();
+    // Forearm
+    ctx.strokeStyle = '#e8b890';
+    ctx.lineWidth = 22;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(startX + 4, startY - 4);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    // Hand
+    ctx.fillStyle = '#f0c4a0';
+    ctx.beginPath();
+    ctx.arc(x, y, 18, 0, Math.PI * 2);
+    ctx.fill();
+    // Knuckle shading
+    ctx.fillStyle = 'rgba(180,120,90,0.35)';
+    ctx.beginPath();
+    ctx.arc(x - 4, y + 3, 14, 0, Math.PI * 2);
+    ctx.fill();
+    // Fingers
+    ctx.strokeStyle = '#d8a888';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x - 12, y - 4); ctx.lineTo(x - 22, y + 4);
+    ctx.moveTo(x - 7, y - 12); ctx.lineTo(x - 14, y - 22);
+    ctx.moveTo(x + 4, y - 14); ctx.lineTo(x + 6, y - 24);
+    ctx.stroke();
+  }
+
+  function drawMallet() {
+    const cx = W / 2;
+    const topY = -H * 0.05;
+    const handleH = H * 0.42;
+    const headSize = Math.min(W * 0.22, 95);
+    const yOff = state === 'play' ? mallet.y : 0;
+    // Handle
+    const handleGrad = ctx.createLinearGradient(cx - 8, 0, cx + 8, 0);
+    handleGrad.addColorStop(0, '#5a3014');
+    handleGrad.addColorStop(0.5, '#8a5028');
+    handleGrad.addColorStop(1, '#5a3014');
+    ctx.strokeStyle = handleGrad;
+    ctx.lineWidth = 14;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(cx, topY + yOff);
+    ctx.lineTo(cx, topY + handleH + yOff);
+    ctx.stroke();
+    // Head
+    const headY = topY + handleH + yOff;
+    const headW = headSize;
+    const headH = headSize * 0.78;
+    const headGrad = ctx.createLinearGradient(cx - headW/2, 0, cx + headW/2, 0);
+    headGrad.addColorStop(0, '#2a1206');
+    headGrad.addColorStop(0.5, '#5a2c12');
+    headGrad.addColorStop(1, '#2a1206');
+    ctx.fillStyle = headGrad;
+    ctx.beginPath();
+    ctx.roundRect(cx - headW/2, headY, headW, headH, 14);
+    ctx.fill();
+    // End cap (front face, lighter)
+    ctx.fillStyle = '#3a1c0c';
+    ctx.beginPath();
+    ctx.ellipse(cx, headY + headH - 2, headW/2 - 2, headH * 0.14, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Wood grain rings on head
+    ctx.strokeStyle = 'rgba(120,70,30,0.4)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.moveTo(cx - headW/2 + 6, headY + 12 + i * 20);
+      ctx.lineTo(cx + headW/2 - 6, headY + 12 + i * 20);
+      ctx.stroke();
+    }
+    // Metal collar between head and handle
+    ctx.fillStyle = '#4a4040';
+    ctx.fillRect(cx - 10, headY - 4, 20, 8);
+  }
+
+  function drawParticles() {
+    for (const p of particles) {
+      ctx.globalAlpha = Math.max(0, p.life);
+      let color;
+      if (p.kind === 'red') color = `rgba(255,80,80,${p.life})`;
+      else if (p.kind === 'steam') color = `rgba(220,220,230,${p.life * 0.45})`;
+      else color = `rgba(255,250,235,${p.life})`;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawTimingArc() {
+    if (state !== 'play') return;
+    const cx = W / 2;
+    const cy = H * 0.36;
+    const r = 38;
+    // Background ring
+    ctx.strokeStyle = 'rgba(255,220,160,0.1)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.stroke();
+    // Safe arc
+    const safeStart = -Math.PI / 2 + Math.PI * 2 * 0.62;
+    const safeEnd = -Math.PI / 2 + Math.PI * 2 * 0.98;
+    ctx.strokeStyle = 'rgba(120,255,160,0.45)';
+    ctx.lineWidth = 7;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, safeStart, safeEnd);
+    ctx.stroke();
+    // Ideal mark
+    const idealAngle = -Math.PI / 2 + Math.PI * 2 * 0.80;
+    ctx.fillStyle = 'rgba(180,255,200,0.7)';
+    ctx.beginPath();
+    ctx.arc(cx + Math.cos(idealAngle) * r, cy + Math.sin(idealAngle) * r, 3, 0, Math.PI * 2);
+    ctx.fill();
+    // Pointer
+    const angle = -Math.PI / 2 + cycleT * Math.PI * 2;
+    const inSafe = isHandSafe(cycleT);
+    const px = cx + Math.cos(angle) * r;
+    const py = cy + Math.sin(angle) * r;
+    if (inSafe) {
+      ctx.shadowColor = '#a4ff9a';
+      ctx.shadowBlur = 14;
+    }
+    ctx.fillStyle = inSafe ? '#b8ffa8' : '#ff7050';
+    ctx.beginPath();
+    ctx.arc(px, py, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  function drawPopup() {
+    if (!popupText) return;
+    const cx = W / 2;
+    const cy = H * 0.5;
+    const a = Math.min(1, popupText.t * 1.5);
+    const yOff = (1 - popupText.t) * 30;
+    ctx.globalAlpha = a;
+    ctx.fillStyle = popupText.color;
+    ctx.font = 'bold 30px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = popupText.color;
+    ctx.shadowBlur = 14;
+    ctx.fillText(popupText.text, cx, cy - yOff);
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+  }
+
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
