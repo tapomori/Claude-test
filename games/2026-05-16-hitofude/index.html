@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#070b1a">
+<title>Hitofude 一筆</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #070b1a;
+    overflow: hidden;
+    font-family: -apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    overscroll-behavior: none;
+  }
+  #stage { position: fixed; inset: 0; display: block; touch-action: none; }
+  .back {
+    position: fixed; top: calc(env(safe-area-inset-top) + 12px); left: 14px;
+    z-index: 30; color: #6f7da8; text-decoration: none;
+    font-size: 13px; letter-spacing: .08em; padding: 6px 10px;
+    border: 1px solid #1f2a4a; border-radius: 999px;
+    background: rgba(10,16,36,.55); backdrop-filter: blur(4px);
+  }
+  .back:active { color: #c9d4ff; }
+
+  .hud {
+    position: fixed; top: calc(env(safe-area-inset-top) + 10px);
+    left: 0; right: 0; z-index: 20;
+    display: flex; justify-content: center; gap: 26px;
+    color: #aeb9e0; font-size: 13px; letter-spacing: .14em;
+    pointer-events: none;
+  }
+  .hud b { color: #ffe7a8; font-weight: 700; font-size: 17px; }
+  .hud .lbl { display: block; font-size: 10px; color: #5d6790; letter-spacing: .22em; }
+
+  .overlay {
+    position: fixed; inset: 0; z-index: 40;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center; padding: 32px;
+    background: radial-gradient(ellipse at 50% 38%, rgba(28,40,82,.55), rgba(7,11,26,.92) 70%);
+    transition: opacity .35s ease;
+  }
+  .overlay.hide { opacity: 0; pointer-events: none; }
+  .title {
+    font-size: 13vw; font-weight: 800; letter-spacing: .12em;
+    color: #f4f0ff;
+    text-shadow: 0 0 24px rgba(150,180,255,.55);
+  }
+  .kanji {
+    margin-top: 4px; font-size: 6vw; color: #8fa0d8; letter-spacing: .5em;
+  }
+  .desc {
+    margin-top: 22px; max-width: 320px; line-height: 1.85;
+    color: #99a4cc; font-size: 14px;
+  }
+  .hint { margin-top: 8px; color: #ffd98a; font-size: 13px; }
+  .cta {
+    margin-top: 34px; color: #cdd6ff; font-size: 14px;
+    letter-spacing: .26em; animation: pulse 1.7s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:1} }
+  .score-big { font-size: 18vw; font-weight: 800; color: #ffe7a8;
+    text-shadow: 0 0 30px rgba(255,210,120,.5); }
+  .score-cap { color: #8fa0d8; font-size: 14px; letter-spacing: .3em; margin-top: 6px; }
+</style>
+</head>
+<body>
+<a class="back" href="../../index.html">&lt; ギャラリー</a>
+<canvas id="stage"></canvas>
+
+<div class="hud" id="hud" style="opacity:0">
+  <div><span class="lbl">星座</span><b id="uiLevel">1</b></div>
+  <div><span class="lbl">残り</span><b id="uiTime">90</b></div>
+  <div><span class="lbl">スコア</span><b id="uiScore">0</b></div>
+</div>
+
+<div class="overlay" id="ovStart">
+  <div class="title">HITOFUDE</div>
+  <div class="kanji">一 筆</div>
+  <div class="desc">光る星を指でなぞり、<br>すべての線を一筆書きで結ぶ。<br>同じ線は二度通れない。</div>
+  <div class="hint">◇ 印の星から始めよう</div>
+  <div class="cta">TAP TO START</div>
+</div>
+
+<div class="overlay hide" id="ovEnd">
+  <div class="score-cap">結んだ星座</div>
+  <div class="score-big" id="endScore">0</div>
+  <div class="score-cap" id="endNote"></div>
+  <div class="cta" style="margin-top:30px">TAP TO RETRY</div>
+</div>
+
+<script>
+(() => {
+  const cv = document.getElementById('stage');
+  const ctx = cv.getContext('2d');
+  let W = 0, H = 0, DPR = 1;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2.5);
+    W = window.innerWidth; H = window.innerHeight;
+    cv.width = W * DPR; cv.height = H * DPR;
+    cv.style.width = W + 'px'; cv.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  const TOTAL_TIME = 90;
+  const ui = {
+    level: document.getElementById('uiLevel'),
+    time: document.getElementById('uiTime'),
+    score: document.getElementById('uiScore'),
+    hud: document.getElementById('hud'),
+  };
+  const ovStart = document.getElementById('ovStart');
+  const ovEnd = document.getElementById('ovEnd');
+  const endScore = document.getElementById('endScore');
+  const endNote = document.getElementById('endNote');
+
+  // ---- background starfield ----
+  const bgStars = [];
+  for (let i = 0; i < 90; i++) {
+    bgStars.push({
+      x: Math.random(), y: Math.random(),
+      r: Math.random() * 1.3 + 0.3,
+      tw: Math.random() * Math.PI * 2,
+      sp: Math.random() * 0.6 + 0.2,
+    });
+  }
+
+  // ---- game state ----
+  let state = 'title'; // title | play | solved | over
+  let level = 1, score = 0, timeLeft = TOTAL_TIME;
+  let nodes = [], edges = [], adj = [];
+  let startNodes = [];
+  let current = -1;          // current node under finger
+  let dragging = false;
+  let usedCount = 0;
+  let particles = [];
+  let solveT = 0;            // solve animation timer
+  let lastT = performance.now();
+  let shake = 0;
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
+
+  // Build a constellation that has a guaranteed single-stroke solution
+  // by recording an actual random trail over a candidate grid graph.
+  function buildLevel(lv) {
+    const playTop = H * 0.16, playBot = H * 0.88;
+    const playLeft = W * 0.10, playRight = W * 0.90;
+    const pw = playRight - playLeft, ph = playBot - playTop;
+
+    const targetNodes = Math.min(5 + lv, 12);
+    // grid sized to comfortably hold targetNodes cells
+    const cols = Math.ceil(Math.sqrt(targetNodes * (pw / ph)));
+    const rows = Math.ceil(targetNodes / cols);
+    const cellW = pw / cols, cellH = ph / rows;
+
+    let best = null;
+    for (let attempt = 0; attempt < 60; attempt++) {
+      // place nodes on jittered, shuffled grid cells
+      const cells = [];
+      for (let r = 0; r < rows; r++)
+        for (let c = 0; c < cols; c++) cells.push([c, r]);
+      for (let i = cells.length - 1; i > 0; i--) {
+        const j = (Math.random() * (i + 1)) | 0;
+        [cells[i], cells[j]] = [cells[j], cells[i]];
+      }
+      const n = Math.min(targetNodes, cells.length);
+      const pts = [];
+      for (let i = 0; i < n; i++) {
+        const [c, r] = cells[i];
+        pts.push({
+          x: playLeft + (c + 0.5) * cellW + rand(-cellW * 0.22, cellW * 0.22),
+          y: playTop + (r + 0.5) * cellH + rand(-cellH * 0.22, cellH * 0.22),
+        });
+      }
+      // candidate edges: connect nearby nodes
+      const reach = Math.hypot(cellW, cellH) * 1.45;
+      const reach2 = reach * reach;
+      const cand = [];          // {a,b}
+      const candAdj = pts.map(() => []);
+      for (let i = 0; i < n; i++)
+        for (let j = i + 1; j < n; j++) {
+          if (dist2(pts[i].x, pts[i].y, pts[j].x, pts[j].y) <= reach2) {
+            const ei = cand.length;
+            cand.push({ a: i, b: j, used: false });
+            candAdj[i].push({ e: ei, o: j });
+            candAdj[j].push({ e: ei, o: i });
+          }
+        }
+      if (cand.length < n) continue;
+
+      // random Euler-style trail: never reuse a candidate edge
+      const startK = (Math.random() * n) | 0;
+      let cur = startK;
+      const trail = [];
+      while (true) {
+        const opts = candAdj[cur].filter(x => !cand[x.e].used);
+        if (!opts.length) break;
+        // bias toward neighbors that still have spare edges (longer trails)
+        opts.sort((p, q) => {
+          const fp = candAdj[p.o].filter(z => !cand[z.e].used).length;
+          const fq = candAdj[q.o].filter(z => !cand[z.e].used).length;
+          return (fq + Math.random()) - (fp + Math.random());
+        });
+        const pick = opts[(Math.random() * Math.min(2, opts.length)) | 0];
+        cand[pick.e].used = true;
+        trail.push([cur, pick.o]);
+        cur = pick.o;
+      }
+      if (!best || trail.length > best.trail.length) best = { pts, trail };
+      if (best.trail.length >= n + 2 + lv) break;
+    }
+
+    // compact: keep only nodes that the trail touches
+    const remap = new Map();
+    nodes = [];
+    for (const [a, b] of best.trail) {
+      for (const k of [a, b]) {
+        if (!remap.has(k)) {
+          remap.set(k, nodes.length);
+          nodes.push({ x: best.pts[k].x, y: best.pts[k].y, pulse: 0, deg: 0 });
+        }
+      }
+    }
+    edges = [];
+    const seen = new Set();
+    for (const [a, b] of best.trail) {
+      const A = remap.get(a), B = remap.get(b);
+      const key = A < B ? A + '_' + B : B + '_' + A;
+      if (seen.has(key)) continue;       // trail never repeats an edge anyway
+      seen.add(key);
+      edges.push({ a: A, b: B, used: false, glow: 0 });
+    }
+    adj = nodes.map(() => []);
+    edges.forEach((e, i) => {
+      adj[e.a].push({ e: i, o: e.b });
+      adj[e.b].push({ e: i, o: e.a });
+      nodes[e.a].deg++; nodes[e.b].deg++;
+    });
+    // valid start = odd-degree nodes; if none (circuit) any node works
+    const odd = nodes.map((nd, i) => i).filter(i => nodes[i].deg % 2 === 1);
+    startNodes = odd.length ? odd : nodes.map((_, i) => i);
+
+    current = -1; dragging = false; usedCount = 0; solveT = 0;
+  }
+
+  function resetStroke() {
+    edges.forEach(e => { e.used = false; });
+    usedCount = 0; current = -1; dragging = false;
+  }
+
+  function spawnBurst(x, y, color, n) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = rand(40, 230);
+      particles.push({
+        x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        life: 1, decay: rand(0.7, 1.8), color,
+        r: rand(1.5, 4),
+      });
+    }
+  }
+
+  function nearestNode(x, y, maxR) {
+    let bi = -1, bd = maxR * maxR;
+    for (let i = 0; i < nodes.length; i++) {
+      const d = dist2(x, y, nodes[i].x, nodes[i].y);
+      if (d < bd) { bd = d; bi = i; }
+    }
+    return bi;
+  }
+
+  function tryAdvance(toNode) {
+    if (toNode === current) return;
+    // find an unused edge between current and toNode
+    for (const a of adj[current]) {
+      if (a.o === toNode && !edges[a.e].used) {
+        edges[a.e].used = true;
+        edges[a.e].glow = 1;
+        usedCount++;
+        nodes[toNode].pulse = 1;
+        nodes[current].pulse = 1;
+        const c = '#ffd98a';
+        spawnBurst(nodes[toNode].x, nodes[toNode].y, c, 14);
+        if (navigator.vibrate) navigator.vibrate(12);
+        current = toNode;
+        if (usedCount === edges.length) onSolved();
+        return;
+      }
+    }
+  }
+
+  function onSolved() {
+    state = 'solved';
+    solveT = 0;
+    score++;
+    if (navigator.vibrate) navigator.vibrate([20, 40, 60]);
+    nodes.forEach(nd => {
+      nd.pulse = 1;
+      spawnBurst(nd.x, nd.y, '#bcd2ff', 18);
+    });
+  }
+
+  function startGame() {
+    state = 'play';
+    level = 1; score = 0; timeLeft = TOTAL_TIME;
+    particles = [];
+    ovStart.classList.add('hide');
+    ovEnd.classList.add('hide');
+    ui.hud.style.opacity = '1';
+    buildLevel(level);
+  }
+
+  function gameOver() {
+    state = 'over';
+    endScore.textContent = score;
+    endNote.textContent = score >= 8 ? '見事な筆運び' :
+                           score >= 4 ? 'いい線いってる' : 'もう一度どうぞ';
+    ovEnd.classList.remove('hide');
+    ui.hud.style.opacity = '0';
+  }
+
+  // ---- input ----
+  function pos(e) {
+    const t = e.touches ? e.touches[0] : e;
+    return { x: t.clientX, y: t.clientY };
+  }
+
+  function down(e) {
+    e.preventDefault();
+    if (state === 'title') { startGame(); return; }
+    if (state === 'over') { startGame(); return; }
+    if (state !== 'play') return;
+    const p = pos(e);
+    const hitR = Math.max(34, Math.min(W, H) * 0.075);
+    const ni = nearestNode(p.x, p.y, hitR);
+    if (ni < 0) return;
+    if (current < 0) {
+      if (startNodes.includes(ni)) {
+        current = ni; dragging = true;
+        nodes[ni].pulse = 1;
+        spawnBurst(nodes[ni].x, nodes[ni].y, '#ffe7a8', 10);
+        if (navigator.vibrate) navigator.vibrate(10);
+      } else {
+        shake = 0.4;
+      }
+    } else {
+      dragging = true;
+    }
+  }
+
+  function move(e) {
+    e.preventDefault();
+    if (state !== 'play' || !dragging || current < 0) return;
+    const p = pos(e);
+    const hitR = Math.max(30, Math.min(W, H) * 0.07);
+    const ni = nearestNode(p.x, p.y, hitR);
+    if (ni >= 0 && ni !== current) tryAdvance(ni);
+  }
+
+  function up(e) {
+    e.preventDefault();
+    if (state !== 'play') return;
+    dragging = false;
+    // lifting before completion clears the stroke so the player can retry
+    if (usedCount > 0 && usedCount < edges.length) {
+      shake = 0.3;
+      resetStroke();
+    }
+  }
+
+  cv.addEventListener('touchstart', down, { passive: false });
+  cv.addEventListener('touchmove', move, { passive: false });
+  cv.addEventListener('touchend', up, { passive: false });
+  cv.addEventListener('touchcancel', up, { passive: false });
+  cv.addEventListener('mousedown', down);
+  cv.addEventListener('mousemove', (e) => { if (e.buttons) move(e); });
+  cv.addEventListener('mouseup', up);
+  ovStart.addEventListener('click', () => { if (state === 'title') startGame(); });
+  ovEnd.addEventListener('click', () => { if (state === 'over') startGame(); });
+
+  // ---- render ----
+  function frame(now) {
+    const dt = Math.min((now - lastT) / 1000, 0.05);
+    lastT = now;
+
+    if (state === 'play') {
+      timeLeft -= dt;
+      if (timeLeft <= 0) { timeLeft = 0; gameOver(); }
+    }
+    if (state === 'solved') {
+      solveT += dt;
+      if (solveT > 1.05) {
+        level++;
+        state = 'play';
+        buildLevel(level);
+      }
+    }
+    if (shake > 0) shake = Math.max(0, shake - dt * 1.6);
+
+    // background
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#0a1130');
+    g.addColorStop(1, '#05070f');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    for (const s of bgStars) {
+      s.tw += dt * s.sp * 3;
+      const a = 0.25 + 0.55 * (0.5 + 0.5 * Math.sin(s.tw));
+      ctx.globalAlpha = a;
+      ctx.fillStyle = '#9fb0e8';
+      ctx.beginPath();
+      ctx.arc(s.x * W, s.y * H, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // shake transform for the puzzle layer
+    let sx = 0, sy = 0;
+    if (shake > 0) { sx = rand(-1, 1) * shake * 9; sy = rand(-1, 1) * shake * 9; }
+    ctx.save();
+    ctx.translate(sx, sy);
+
+    if (state === 'play' || state === 'solved' || state === 'over') {
+      const solveGlow = state === 'solved' ? Math.sin(Math.min(solveT / 1.05, 1) * Math.PI) : 0;
+
+      // edges
+      for (const e of edges) {
+        const A = nodes[e.a], B = nodes[e.b];
+        if (e.glow > 0) e.glow = Math.max(0, e.glow - dt * 2);
+        if (e.used) {
+          ctx.lineCap = 'round';
+          ctx.strokeStyle = '#ffd98a';
+          ctx.shadowColor = '#ffba5a';
+          ctx.shadowBlur = 16 + e.glow * 22 + solveGlow * 26;
+          ctx.lineWidth = 3.4 + e.glow * 2.5 + solveGlow * 2;
+          ctx.globalAlpha = 0.9;
+          ctx.beginPath();
+          ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y);
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        } else {
+          ctx.strokeStyle = 'rgba(150,170,230,0.34)';
+          ctx.lineWidth = 1.6;
+          ctx.globalAlpha = 1;
+          ctx.setLineDash([3, 9]);
+          ctx.beginPath();
+          ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+      }
+      ctx.globalAlpha = 1;
+
+      // nodes
+      for (let i = 0; i < nodes.length; i++) {
+        const nd = nodes[i];
+        if (nd.pulse > 0) nd.pulse = Math.max(0, nd.pulse - dt * 2.2);
+        const isStart = current < 0 && startNodes.includes(i);
+        const baseR = 7 + nd.pulse * 6 + solveGlow * 5;
+
+        if (isStart) {
+          const t = (now / 600) % (Math.PI * 2);
+          ctx.strokeStyle = 'rgba(255,217,138,' + (0.45 + 0.35 * Math.sin(t)) + ')';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(nd.x, nd.y, 16 + 3 * Math.sin(t), 0, Math.PI * 2);
+          ctx.stroke();
+          // small diamond marker
+          ctx.fillStyle = '#ffe7a8';
+          ctx.save();
+          ctx.translate(nd.x, nd.y - 26);
+          ctx.rotate(Math.PI / 4);
+          ctx.fillRect(-3, -3, 6, 6);
+          ctx.restore();
+        }
+
+        const lit = i === current || nd.pulse > 0.02;
+        ctx.fillStyle = lit ? '#fff3cf' : '#cdd8ff';
+        ctx.shadowColor = lit ? '#ffcf7a' : '#7e93d8';
+        ctx.shadowBlur = 14 + nd.pulse * 18 + solveGlow * 20;
+        ctx.beginPath();
+        ctx.arc(nd.x, nd.y, baseR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        if (i === current) {
+          ctx.strokeStyle = 'rgba(255,243,207,0.9)';
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.arc(nd.x, nd.y, baseR + 7, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+    }
+
+    // particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.life -= dt * p.decay;
+      if (p.life <= 0) { particles.splice(i, 1); continue; }
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vx *= 0.94; p.vy *= 0.94;
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r * p.life, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    // hud
+    ui.level.textContent = level;
+    ui.time.textContent = Math.ceil(timeLeft);
+    ui.score.textContent = score;
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
