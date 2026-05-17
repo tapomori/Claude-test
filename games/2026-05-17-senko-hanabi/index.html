@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no, maximum-scale=1">
+<meta name="theme-color" content="#0a0a18">
+<title>線香花火 — Senkō Hanabi</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body {
+    width:100%; height:100%; overflow:hidden;
+    background:#07060f;
+    font-family:"Hiragino Mincho ProN","Yu Mincho",serif;
+    color:#f3e6c8;
+    touch-action:manipulation;
+    overscroll-behavior:none;
+  }
+  #stage { position:fixed; inset:0; }
+  canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
+
+  .hud {
+    position:absolute; top:0; left:0; right:0;
+    padding:14px 18px calc(env(safe-area-inset-top));
+    padding-top:calc(14px + env(safe-area-inset-top));
+    display:flex; justify-content:space-between; align-items:flex-start;
+    pointer-events:none; z-index:5;
+    text-shadow:0 1px 6px rgba(0,0,0,.8);
+  }
+  .hud .score { font-size:26px; letter-spacing:.04em; }
+  .hud .score small { display:block; font-size:11px; opacity:.6; letter-spacing:.2em; margin-bottom:2px; }
+  .hud .right { text-align:right; }
+  .mult { font-size:15px; color:#ffd27a; opacity:.95; }
+  .lives { margin-top:6px; font-size:18px; letter-spacing:4px; }
+
+  .phase {
+    position:absolute; left:0; right:0; bottom:30%;
+    text-align:center; pointer-events:none; z-index:4;
+    font-size:22px; letter-spacing:.5em;
+    opacity:0; transition:opacity .5s;
+    color:#ffe6a8; text-shadow:0 0 18px rgba(255,180,80,.7);
+  }
+  .phase.show { opacity:.92; }
+  .phase small { display:block; font-size:11px; letter-spacing:.35em; opacity:.55; margin-top:6px; }
+
+  .back {
+    position:absolute; left:14px; bottom:calc(12px + env(safe-area-inset-bottom));
+    z-index:6; pointer-events:auto;
+    color:#cdbf9d; text-decoration:none; font-size:13px;
+    letter-spacing:.15em; opacity:.55;
+    border:1px solid rgba(205,191,157,.3);
+    padding:7px 14px; border-radius:20px;
+    background:rgba(10,10,24,.4); backdrop-filter:blur(2px);
+  }
+  .back:active { opacity:1; }
+
+  .overlay {
+    position:absolute; inset:0; z-index:10;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; padding:32px;
+    background:radial-gradient(circle at 50% 42%, rgba(28,20,50,.55), rgba(7,6,15,.94) 70%);
+    transition:opacity .45s;
+    pointer-events:none;            /* taps fall through to the game */
+  }
+  .overlay.hide { opacity:0; }
+  .title {
+    font-size:40px; letter-spacing:.28em; margin-bottom:6px;
+    color:#ffe1a6; text-shadow:0 0 26px rgba(255,170,70,.55);
+  }
+  .sub { font-size:12px; letter-spacing:.4em; opacity:.5; margin-bottom:34px; }
+  .lead { font-size:15px; line-height:2; opacity:.82; max-width:320px; margin-bottom:30px; }
+  .lead b { color:#ffd27a; font-weight:normal; }
+  .pulse {
+    width:18px; height:18px; border-radius:50%;
+    background:#ffcf6e; box-shadow:0 0 24px 10px rgba(255,170,70,.6);
+    animation:beat 1.5s ease-in-out infinite;
+  }
+  @keyframes beat { 0%,100%{ transform:scale(.85); opacity:.7;} 50%{ transform:scale(1.25); opacity:1;} }
+  .hint { font-size:12px; letter-spacing:.3em; opacity:.55; margin-top:22px; animation:fade 2s ease-in-out infinite; }
+  @keyframes fade { 0%,100%{opacity:.3;} 50%{opacity:.7;} }
+  .result { font-size:13px; line-height:2.1; opacity:.8; margin-bottom:26px; }
+  .result .big { font-size:30px; color:#ffe1a6; display:block; margin:4px 0 2px; }
+  .best { font-size:12px; letter-spacing:.2em; opacity:.55; margin-top:8px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="c"></canvas>
+
+  <div class="hud">
+    <div class="score"><small>SCORE</small><span id="score">0</span></div>
+    <div class="right">
+      <div class="mult" id="mult">×1.0</div>
+      <div class="lives" id="lives">🎇🎇🎇</div>
+    </div>
+  </div>
+
+  <div class="phase" id="phaseLabel"></div>
+
+  <a class="back" href="../../index.html">‹ ギャラリー</a>
+
+  <div class="overlay" id="startScreen">
+    <div class="title">線香花火</div>
+    <div class="sub">S E N K Ō &nbsp; H A N A B I</div>
+    <div class="pulse"></div>
+    <div class="lead" style="margin-top:30px">
+      火球に<b>そっと指を当て、動かさない</b>。<br>
+      風で揺れたら、ほんの少しだけ指で戻す。<br>
+      慌てれば玉は<b>落ちて消える</b>——<br>
+      静けさのまま、四つの花を咲かせきれ。
+    </div>
+    <div class="hint">画面に触れて灯す</div>
+  </div>
+
+  <div class="overlay hide" id="endScreen">
+    <div class="title" id="endTitle">線香、燃え尽きぬ</div>
+    <div class="result" id="endResult"></div>
+    <div class="best" id="endBest"></div>
+    <div class="hint">画面に触れてもう一度</div>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const cv = document.getElementById('c');
+  const ctx = cv.getContext('2d');
+  const elScore = document.getElementById('score');
+  const elMult  = document.getElementById('mult');
+  const elLives = document.getElementById('lives');
+  const elPhase = document.getElementById('phaseLabel');
+  const startScreen = document.getElementById('startScreen');
+  const endScreen   = document.getElementById('endScreen');
+  const endTitle = document.getElementById('endTitle');
+  const endResult = document.getElementById('endResult');
+  const endBest = document.getElementById('endBest');
+
+  let W=0, H=0, DPR=1;
+  function resize(){
+    DPR = Math.min(window.devicePixelRatio||1, 2.5);
+    W = window.innerWidth; H = window.innerHeight;
+    cv.width = W*DPR; cv.height = H*DPR;
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  const rnd = (a,b)=> a + Math.random()*(b-a);
+  const clamp = (v,a,b)=> v<a?a:(v>b?b:v);
+  function vibrate(p){ if(navigator.vibrate){ try{ navigator.vibrate(p); }catch(e){} } }
+
+  // ---- phases ----
+  // duration(s) of each, name, sparkScale, fragility(0..1 higher=easier to drop)
+  const PHASES = [
+    { name:'蕾',   roma:'TSUBOMI',  dur:3.5, spark:0.15, frag:0.35, scoreRate:6  },
+    { name:'牡丹', roma:'BOTAN',    dur:5.0, spark:0.8,  frag:0.55, scoreRate:14 },
+    { name:'松葉', roma:'MATSUBA',  dur:7.0, spark:1.6,  frag:0.75, scoreRate:26 },
+    { name:'散り菊', roma:'CHIRIGIKU', dur:5.0, spark:0.55, frag:0.9, scoreRate:18 },
+  ];
+  const TOTAL_LIFE = PHASES.reduce((s,p)=>s+p.dur,0);
+
+  const STATE = { MENU:0, PLAY:1, OVER:2 };
+
+  const game = {
+    state: STATE.MENU,
+    score: 0,
+    best: +(localStorage.getItem('senko_best')||0),
+    sparklers: 3,
+    mult: 1,
+    streak: 0,
+  };
+
+  // ---- the live sparkler ----
+  let s = null;
+  function newSparkler(){
+    s = {
+      lit:false,
+      life:0,           // seconds since lit
+      phaseIdx:0,
+      ox: W*0.5, oy: H*0.40,   // origin = where the sparkler was lit
+      px: W*0.5, py: H*0.40,   // raw pointer (finger) position
+      sx:0, sy:0,              // smoothed ember offset from origin (px)
+      wobx:0, woby:0,          // wind wobble offset (px)
+      L: Math.min(W,H)*0.17,   // hang distance below the finger
+      SAFE: Math.min(W,H)*0.14,// drift tolerance radius
+      stability:1,             // 0..1, ring health
+      windPhase: rnd(0,Math.PI*2),
+      gustT: rnd(2,4), gust:0, gustDir:1,
+      jolt:0,
+      ended:false,
+      finished:false,
+      heldScore:0,
+    };
+  }
+
+  // ember world position (origin + drift + wind wobble)
+  function emberPos(){
+    return {
+      x: s.ox + s.sx + s.wobx,
+      y: s.oy + s.L + s.sy + s.woby,
+    };
+  }
+
+  // ---- particles ----
+  const sparks = [];
+  function emitSpark(x,y, scale, gen){
+    const a = rnd(0,Math.PI*2);
+    const sp = rnd(40,150)*(0.6+scale*0.7);
+    sparks.push({
+      x,y,
+      vx:Math.cos(a)*sp, vy:Math.sin(a)*sp - rnd(8,30),
+      life:1, decay: rnd(0.7,1.6)/(0.7+scale),
+      gen: gen||0,
+      hot: Math.random()<0.5,
+      r: rnd(0.8,1.8),
+      branchAt: gen<2 ? rnd(0.25,0.6) : -1,
+      branched:false,
+    });
+  }
+  const dust = []; // gentle floating embers in bg
+  for(let i=0;i<26;i++){
+    dust.push({ x:rnd(0,W), y:rnd(0,H), v:rnd(4,16), r:rnd(.4,1.4), o:rnd(.05,.25), ph:rnd(0,6.28) });
+  }
+
+  // ---- input ----
+  let pointerDown=false, lastPX=0, lastPY=0, lastT=0;
+  function pointFromEvt(e){
+    const t = e.touches ? e.touches[0] : e;
+    return { x:t.clientX, y:t.clientY };
+  }
+  function onBackLink(e){ return e.target && e.target.closest && e.target.closest('a.back'); }
+  function onDown(e){
+    if(onBackLink(e)) return;          // let the gallery link work
+    e.preventDefault();
+    if(game.state===STATE.MENU){ startGame(); }
+    else if(game.state===STATE.OVER){ if(Date.now()-overAt>700){ startGame(); } return; }
+    const p = pointFromEvt(e);
+    pointerDown=true; lastPX=p.x; lastPY=p.y; lastT=performance.now();
+    if(s && !s.lit && !s.ended){
+      s.lit=true;
+      s.ox=p.x; s.oy=p.y; s.px=p.x; s.py=p.y;
+      s.sx=0; s.sy=0; s.wobx=0; s.woby=0;
+      vibrate(18);
+    } else if(s){ s.px=p.x; s.py=p.y; }
+  }
+  function onMove(e){
+    if(!pointerDown || !s || !s.lit || s.ended) return;
+    e.preventDefault();
+    const p = pointFromEvt(e);
+    const now = performance.now();
+    const dt = Math.max(8, now-lastT);
+    const vx=(p.x-lastPX)/dt*1000, vy=(p.y-lastPY)/dt*1000;
+    const speed = Math.hypot(vx,vy);
+    // sudden movement => jolt
+    if(speed > 900){ s.jolt += (speed-900)*0.00055; }
+    s.px=p.x; s.py=p.y;
+    lastPX=p.x; lastPY=p.y; lastT=now;
+  }
+  function onUp(e){
+    if(e && onBackLink(e)) return;
+    if(e) e.preventDefault();
+    pointerDown=false;
+    if(game.state===STATE.PLAY && s && s.lit && !s.ended){
+      // letting go = the sparkler drops
+      dropSparkler(true);
+    }
+  }
+  window.addEventListener('touchstart', onDown, {passive:false});
+  window.addEventListener('touchmove',  onMove, {passive:false});
+  window.addEventListener('touchend',   onUp,   {passive:false});
+  window.addEventListener('touchcancel',onUp,   {passive:false});
+  window.addEventListener('mousedown', onDown);
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+
+  // ---- flow ----
+  let overAt=0;
+  function startGame(){
+    game.state=STATE.PLAY;
+    game.score=0; game.sparklers=3; game.mult=1; game.streak=0;
+    sparks.length=0;
+    updateHUD();
+    startScreen.classList.add('hide');
+    endScreen.classList.add('hide');
+    newSparkler();
+    showPhase(null);
+  }
+
+  function dropSparkler(byRelease){
+    if(s.ended) return;
+    game.score += s.heldScore;            // keep points earned up to the drop
+    s.ended=true; s.finished=false;
+    const ep = emberPos();
+    // shower of falling dying sparks
+    for(let i=0;i<46;i++){
+      const a=rnd(0,Math.PI*2), sp=rnd(20,120);
+      sparks.push({ x:ep.x,y:ep.y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp,
+        life:1, decay:rnd(1.2,2.4), gen:3, hot:false, r:rnd(1,2), branchAt:-1, branched:false, dying:true });
+    }
+    vibrate(byRelease?[40]:[60,40,90]);
+    game.streak=0; game.mult=1;
+    game.sparklers--;
+    updateHUD();
+    flash = byRelease?0.35:0.7;
+    setTimeout(nextOrEnd, 950);
+  }
+
+  function finishSparkler(){
+    s.ended=true; s.finished=true;
+    game.score += s.heldScore;            // commit this sparkler's earned points
+    countFinished++;
+    game.streak++;
+    game.mult = Math.min(4, +(1 + game.streak*0.5).toFixed(1));
+    const bonus = Math.round((220 + game.streak*120) * game.mult);
+    game.score += bonus;
+    vibrate([20,50,20,50,30]);
+    showPhase({name:'完火', roma:`+${bonus}  COMPLETE`});
+    updateHUD();
+    setTimeout(nextOrEnd, 1300);
+  }
+
+  function nextOrEnd(){
+    showPhase(null);
+    if(game.sparklers<=0){ endGame(); return; }
+    newSparkler();
+  }
+
+  function endGame(){
+    game.state=STATE.OVER;
+    overAt=Date.now();
+    const finalScore = Math.round(game.score);
+    const isBest = finalScore>game.best;
+    if(isBest){ game.best=finalScore; localStorage.setItem('senko_best',game.best); }
+    endTitle.textContent = countFinished>=1 ? '夜が静かに更けた' : '線香、燃え尽きぬ';
+    endResult.innerHTML = `<span class="big">${finalScore}</span>得点<br>咲かせきった花火 ${countFinished} 本`;
+    endBest.textContent = (isBest?'★ 自己ベスト更新  ':'BEST  ') + game.best;
+    endScreen.classList.remove('hide');
+  }
+
+  let countFinished=0;
+  function liveScore(){
+    let v = game.score;
+    if(s && s.lit && !s.ended) v += s.heldScore;
+    return Math.round(v);
+  }
+  function updateHUD(){
+    elScore.textContent = liveScore();
+    elMult.textContent = '×'+game.mult.toFixed(1);
+    elLives.textContent = '🎇'.repeat(Math.max(0,game.sparklers)) || '—';
+  }
+  let phaseTimer=0;
+  function showPhase(p){
+    if(!p){ elPhase.classList.remove('show'); return; }
+    elPhase.innerHTML = p.name + '<small>'+p.roma+'</small>';
+    elPhase.classList.add('show');
+    phaseTimer = 1.5;
+  }
+
+  // ---- update ----
+  let flash=0;
+  function update(dt){
+    // bg dust
+    for(const d of dust){
+      d.y -= d.v*dt; d.x += Math.sin(d.ph+performance.now()/1400)*0.25;
+      if(d.y<-4){ d.y=H+4; d.x=rnd(0,W); }
+    }
+    // sparks
+    for(let i=sparks.length-1;i>=0;i--){
+      const k=sparks[i];
+      k.life -= k.decay*dt;
+      if(k.life<=0){ sparks.splice(i,1); continue; }
+      k.vy += 240*dt;            // gravity
+      k.vx *= (1-1.4*dt);
+      k.x += k.vx*dt; k.y += k.vy*dt;
+      if(k.branchAt>0 && !k.branched && k.life < (1-k.branchAt)){
+        k.branched=true;
+        const n = 2 + (Math.random()<0.5?1:0);
+        for(let b=0;b<n;b++){
+          const ang=Math.atan2(k.vy,k.vx)+rnd(-0.9,0.9);
+          const sp=Math.hypot(k.vx,k.vy)*rnd(.5,.9);
+          sparks.push({ x:k.x,y:k.y, vx:Math.cos(ang)*sp, vy:Math.sin(ang)*sp,
+            life:k.life*0.9, decay:k.decay*1.25, gen:k.gen+1, hot:Math.random()<0.35,
+            r:k.r*0.8, branchAt: k.gen+1<2?rnd(.3,.55):-1, branched:false });
+        }
+      }
+    }
+    if(phaseTimer>0){ phaseTimer-=dt; if(phaseTimer<=0 && s && !s.finished) showPhase(null); }
+
+    if(game.state!==STATE.PLAY || !s) return;
+    if(flash>0) flash=Math.max(0,flash-dt*1.6);
+    if(!s.lit || s.ended) return;
+
+    // ---- progress life / phases ----
+    s.life += dt;
+    let acc=0, idx=0;
+    for(let i=0;i<PHASES.length;i++){ acc+=PHASES[i].dur; if(s.life<acc){ idx=i; break; } idx=i; }
+    if(idx!==s.phaseIdx){
+      s.phaseIdx=idx;
+      showPhase(PHASES[idx]);
+      vibrate(14);
+    }
+    const ph = PHASES[s.phaseIdx];
+
+    if(s.life>=TOTAL_LIFE){ finishSparkler(); return; }
+
+    const heavy = 1 + s.life/TOTAL_LIFE*0.6;   // matures heavier => more fragile
+
+    // ---- ember tracks finger drift from where it was lit ----
+    const tx = s.px - s.ox, ty = s.py - s.oy;
+    s.sx += (tx - s.sx)*Math.min(1, dt*12);
+    s.sy += (ty - s.sy)*Math.min(1, dt*12);
+
+    // ---- gentle wind wobble ----
+    s.windPhase += dt*1.1;
+    s.gustT -= dt;
+    if(s.gustT<=0){
+      s.gust = rnd(0.5,1) * (0.4 + s.phaseIdx*0.25);
+      s.gustDir = Math.random()<0.5?-1:1;
+      s.gustT = rnd(2.2,4);
+    }
+    s.gust *= (1 - 0.8*dt);
+    s.wobx = (Math.sin(s.windPhase)*0.12 + s.gust*s.gustDir*0.20) * s.SAFE * heavy;
+    s.woby = Math.cos(s.windPhase*0.7) * 0.05 * s.SAFE;
+
+    // ---- stability: how far the ember strays from the calm zone ----
+    let dist = Math.hypot(s.sx + s.wobx, s.sy + s.woby);
+    if(s.jolt>0){ dist += s.jolt*s.SAFE*0.55; s.jolt*=(1-3.2*dt); if(s.jolt<0.02)s.jolt=0; }
+    const r = dist / s.SAFE;
+    if(r < 0.42){
+      s.stability = Math.min(1, s.stability + dt*0.45);
+    } else {
+      s.stability -= (r-0.38) * ph.frag * heavy * dt;
+    }
+    if(s.jolt>0.35) s.stability -= s.jolt*dt*0.8;
+
+    if(s.stability<=0){ s.stability=0; dropSparkler(false); return; }
+
+    // ---- scoring ----
+    const gain = ph.scoreRate * (0.4 + s.stability*0.6) * game.mult * dt;
+    s.heldScore += gain;
+    updateHUD();
+  }
+
+  // ---- render ----
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    // night sky
+    const g=ctx.createRadialGradient(W*0.5,H*0.34,30, W*0.5,H*0.5,Math.max(W,H)*0.85);
+    g.addColorStop(0,'#181433'); g.addColorStop(.5,'#0c0a1c'); g.addColorStop(1,'#060510');
+    ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+    // moon
+    ctx.save();
+    ctx.globalAlpha=.5;
+    ctx.fillStyle='#2c2748';
+    ctx.beginPath(); ctx.arc(W*0.8,H*0.16,34,0,7); ctx.fill();
+    ctx.restore();
+    // dust embers
+    for(const d of dust){
+      ctx.globalAlpha=d.o; ctx.fillStyle='#ffcf8a';
+      ctx.beginPath(); ctx.arc(d.x,d.y,d.r,0,7); ctx.fill();
+    }
+    ctx.globalAlpha=1;
+
+    if(s && (s.lit||s.ended)){
+      const ep = emberPos();
+      // twisted paper held at the finger, ember hanging below
+      ctx.strokeStyle='rgba(190,150,120,.4)';
+      ctx.lineWidth=2;
+      ctx.beginPath(); ctx.moveTo(s.px,s.py);
+      ctx.quadraticCurveTo(s.px,(s.py+ep.y)/2, ep.x,ep.y); ctx.stroke();
+
+      if(!s.ended){
+        // faint "calm zone" at the lit point — teaches where to keep the ember
+        const restX=s.ox, restY=s.oy+s.L;
+        ctx.save();
+        ctx.globalAlpha=.5;
+        ctx.setLineDash([3,6]);
+        ctx.strokeStyle='rgba(150,170,210,.35)';
+        ctx.lineWidth=1.5;
+        ctx.beginPath(); ctx.arc(restX,restY,s.SAFE*0.42,0,Math.PI*2); ctx.stroke();
+        ctx.restore();
+
+        // stability ring around the ember
+        const rr = Math.max(20, s.SAFE*0.42);
+        ctx.save();
+        ctx.translate(ep.x,ep.y);
+        ctx.lineWidth=3;
+        ctx.strokeStyle=`rgba(255,210,130,${0.15})`;
+        ctx.beginPath(); ctx.arc(0,0,rr,0,Math.PI*2); ctx.stroke();
+        const col = s.stability>0.5? '255,215,140' : (s.stability>0.25?'255,170,90':'255,90,70');
+        ctx.strokeStyle=`rgba(${col},${0.85})`;
+        ctx.lineWidth=4;
+        ctx.beginPath(); ctx.arc(0,0,rr,-Math.PI/2, -Math.PI/2 + Math.PI*2*s.stability); ctx.stroke();
+        ctx.restore();
+
+        // ember glow
+        const ph=PHASES[s.phaseIdx];
+        const pulse = 1 + Math.sin(performance.now()/90)*0.12;
+        const er = (5 + s.phaseIdx*1.6)*pulse;
+        const gg=ctx.createRadialGradient(ep.x,ep.y,0, ep.x,ep.y, er*6);
+        gg.addColorStop(0,'rgba(255,255,230,.95)');
+        gg.addColorStop(.25,'rgba(255,200,110,.8)');
+        gg.addColorStop(.6,'rgba(255,120,50,.35)');
+        gg.addColorStop(1,'rgba(255,80,30,0)');
+        ctx.fillStyle=gg;
+        ctx.beginPath(); ctx.arc(ep.x,ep.y,er*6,0,7); ctx.fill();
+        ctx.fillStyle='#fff7e0';
+        ctx.beginPath(); ctx.arc(ep.x,ep.y,er,0,7); ctx.fill();
+
+        // emit sparks based on phase
+        const rate = ph.spark * (0.5+s.stability*0.5);
+        emitAcc += rate * 60 * lastDt;
+        while(emitAcc>1){ emitAcc--; emitSpark(ep.x,ep.y, ph.spark, 0); }
+      }
+    }
+
+    // draw sparks (additive glow)
+    ctx.globalCompositeOperation='lighter';
+    for(const k of sparks){
+      const a = clamp(k.life,0,1);
+      const hot = k.hot && k.life>0.5;
+      ctx.strokeStyle = hot
+        ? `rgba(220,235,255,${a})`
+        : `rgba(255,${150+Math.floor(80*a)},${50+Math.floor(40*a)},${a})`;
+      ctx.lineWidth=k.r*(0.7+a*0.6);
+      ctx.beginPath();
+      ctx.moveTo(k.x,k.y);
+      ctx.lineTo(k.x - k.vx*0.025, k.y - k.vy*0.025);
+      ctx.stroke();
+      if(a>0.6){
+        ctx.fillStyle=`rgba(255,240,200,${a*0.9})`;
+        ctx.beginPath(); ctx.arc(k.x,k.y,k.r*0.9,0,7); ctx.fill();
+      }
+    }
+    ctx.globalCompositeOperation='source-over';
+
+    if(flash>0){
+      ctx.fillStyle=`rgba(255,180,90,${flash*0.5})`;
+      ctx.fillRect(0,0,W,H);
+    }
+  }
+
+  let emitAcc=0, lastDt=0.016;
+  let last=performance.now();
+  function loop(now){
+    let dt=(now-last)/1000; last=now;
+    if(dt>0.05) dt=0.05;
+    lastDt=dt;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  // safety: stop scrolling/zoom gestures
+  document.addEventListener('gesturestart', e=>e.preventDefault());
+  document.addEventListener('touchmove', e=>{ if(e.touches.length>1) e.preventDefault(); }, {passive:false});
+})();
+</script>
+</body>
+</html>
