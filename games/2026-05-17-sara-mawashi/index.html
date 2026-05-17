@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Sara-mawashi</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body {
+    width:100%; height:100%; overflow:hidden;
+    background:#0a0712;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    overscroll-behavior:none; touch-action:none;
+    -webkit-user-select:none; user-select:none;
+    -webkit-tap-highlight-color:transparent;
+  }
+  #c { position:fixed; inset:0; display:block; touch-action:none; }
+  .back {
+    position:fixed; top:max(10px,env(safe-area-inset-top)); left:14px; z-index:10;
+    color:#7a6a55; text-decoration:none; font-size:13px; letter-spacing:.05em;
+    padding:7px 12px; border:1px solid #2c2233; border-radius:20px;
+    background:rgba(14,10,20,.55); backdrop-filter:blur(4px);
+  }
+  .back:active { color:#ffd24a; }
+</style>
+</head>
+<body>
+<a class="back" href="../../index.html">&larr; 戻る</a>
+<canvas id="c"></canvas>
+<script>
+(function(){
+  "use strict";
+  const cv = document.getElementById('c');
+  const ctx = cv.getContext('2d');
+  let W=0,H=0,DPR=1;
+
+  function resize(){
+    DPR = Math.min(window.devicePixelRatio||1, 2.5);
+    W = window.innerWidth; H = window.innerHeight;
+    cv.width = W*DPR; cv.height = H*DPR;
+    cv.style.width = W+'px'; cv.style.height = H+'px';
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    layout();
+  }
+  window.addEventListener('resize', resize);
+
+  // ---- layout ----
+  const MAX = 5;
+  const SLOT_ORDER = [2,1,3,0,4];          // order slots fill in
+  let floorY=0, plateRx=0, plateRy=0;
+  const slotX = new Array(MAX);
+  const slotPivotY = new Array(MAX);
+
+  function layout(){
+    floorY = H*0.90;
+    plateRx = Math.max(26, Math.min(W/MAX*0.66, H*0.085));
+    plateRy = plateRx*0.36;
+    for(let i=0;i<MAX;i++){
+      slotX[i] = W*((i+0.5)/MAX);
+      // alternate heights so plates don't overlap (太神楽 style)
+      slotPivotY[i] = (i%2===0) ? H*0.30 : H*0.45;
+    }
+  }
+
+  // ---- state ----
+  let plates=[], particles=[], shards=[], floats=[];
+  let lives, score, best, combo, elapsed, spawnQ, nextSpawnIdx;
+  let state='play';
+  let shakeT=0, shakeMag=0, flashT=0, hintT=0;
+
+  best = parseInt(localStorage.getItem('saramawashi_best')||'0',10)||0;
+
+  function reset(){
+    plates=[]; particles=[]; shards=[]; floats=[];
+    lives=3; score=0; combo=0; elapsed=0;
+    state='play'; shakeT=0; flashT=0; hintT=4.5;
+    // start with 3 plates
+    nextSpawnIdx=0;
+    spawnQ=[];
+    for(let k=0;k<3;k++) addPlate(SLOT_ORDER[nextSpawnIdx++]);
+    // queue additions
+    spawnQ.push({t:16, slot:SLOT_ORDER[3]});
+    spawnQ.push({t:34, slot:SLOT_ORDER[4]});
+  }
+
+  function addPlate(slot){
+    plates.push({
+      slot,
+      spin: 0.85,
+      ang: Math.random()*6.28,
+      wob: Math.random()*6.28,
+      unstable: 0,
+      enter: 0,            // 0..1 entrance grow
+      alive: true,
+      cpop: 0,             // combo pop timer
+      cval: 0
+    });
+  }
+
+  // ---- input ----
+  function hitPlate(px,py){
+    let bi=-1, bd=1e9;
+    for(let i=0;i<plates.length;i++){
+      const p=plates[i]; if(!p.alive) continue;
+      const cx=slotX[p.slot], cy=slotPivotY[p.slot];
+      // generous column hit: close in x, anywhere from plate down the stick
+      const dx=Math.abs(px-cx);
+      if(dx > Math.max(plateRx*1.25, W/MAX*0.46)) continue;
+      if(py < cy-plateRy*3 || py > floorY+30) continue;
+      const d=dx + Math.abs(py-cy)*0.15;
+      if(d<bd){ bd=d; bi=i; }
+    }
+    return bi;
+  }
+
+  function tap(px,py){
+    if(state==='over'){ reset(); return; }
+    hintT=0;
+    const idx=hitPlate(px,py);
+    if(idx<0) return;
+    const p=plates[idx];
+    const cx=slotX[p.slot], cy=slotPivotY[p.slot];
+
+    if(p.spin < 0.32){
+      // RESCUE — last-moment save, best reward
+      p.spin = 1.0; p.unstable=0;
+      combo++;
+      const gain = 50 + 12*combo;
+      score += gain;
+      addFloat(cx, cy-plateRy*3, '+'+gain, '#7dffea', 1.0);
+      p.cpop=0.7; p.cval=combo;
+      burst(cx,cy,18,'#7dffea',2.4);
+      ring(cx,cy,'#bdfff4');
+      vibrate(32);
+      flashT=0.18;
+    } else if(p.spin < 0.80){
+      // good spin
+      p.spin = Math.min(1.0, p.spin + 0.42);
+      combo++;
+      const gain = 8 + 4*combo;
+      score += gain;
+      if(combo>1){ p.cpop=0.55; p.cval=combo; }
+      burst(cx,cy,10,'#ffd24a',1.7);
+      ring(cx,cy,'#ffe79a');
+      vibrate(12);
+    } else {
+      // OVERSPIN — punishing a healthy plate wobbles the axle
+      p.spin = Math.min(1.12, p.spin + 0.05);
+      p.unstable = 1.6;
+      p.wob += 1.2;
+      combo = 0;
+      burst(cx,cy,9,'#ff5566',2.0);
+      vibrate(8);
+    }
+  }
+
+  cv.addEventListener('pointerdown', function(e){
+    e.preventDefault();
+    tap(e.clientX, e.clientY);
+  }, {passive:false});
+
+  // ---- effects ----
+  function vibrate(ms){ if(navigator.vibrate) try{ navigator.vibrate(ms); }catch(_){} }
+
+  function burst(x,y,n,col,sp){
+    for(let i=0;i<n;i++){
+      const a=Math.random()*6.28, v=(0.4+Math.random())*sp;
+      particles.push({x,y,vx:Math.cos(a)*v*60,vy:Math.sin(a)*v*60-40,
+        life:0.5+Math.random()*0.4,max:0.9,size:2+Math.random()*2.5,col});
+    }
+  }
+  function ring(x,y,col){
+    particles.push({ring:true,x,y,r:plateRx*0.7,life:0.38,max:0.38,col});
+  }
+  function addFloat(x,y,txt,col,life){
+    floats.push({x,y,txt,col,life,max:life});
+  }
+  function shatter(x,y){
+    for(let i=0;i<14;i++){
+      const a=Math.random()*6.28, v=(1+Math.random()*2.4);
+      shards.push({x,y,
+        vx:Math.cos(a)*v*70, vy:Math.sin(a)*v*70-120,
+        rot:Math.random()*6.28, vr:(Math.random()-0.5)*12,
+        s:plateRx*(0.18+Math.random()*0.22), life:1.2, max:1.2});
+    }
+    flashT=0.25; shakeT=0.4; shakeMag=14;
+    vibrate([40,30,60]);
+  }
+
+  // ---- update ----
+  function update(dt){
+    elapsed+=dt;
+    if(hintT>0) hintT-=dt;
+
+    // spawn queue
+    for(let i=spawnQ.length-1;i>=0;i--){
+      if(elapsed>=spawnQ[i].t){
+        // only add if slot empty
+        const taken = plates.some(p=>p.alive && p.slot===spawnQ[i].slot);
+        if(!taken) addPlate(spawnQ[i].slot);
+        spawnQ.splice(i,1);
+      }
+    }
+
+    const decayBase = 0.052 + 0.011*plates.filter(p=>p.alive).length + elapsed*0.00050;
+
+    for(let i=plates.length-1;i>=0;i--){
+      const p=plates[i];
+      if(!p.alive){ plates.splice(i,1); continue; }
+      if(p.enter<1) p.enter=Math.min(1,p.enter+dt*2.4);
+
+      let dec=decayBase;
+      if(p.unstable>0){ p.unstable-=dt; dec*=2.2; }
+      // slightly faster bleed when very low (tension)
+      if(p.spin<0.3) dec*=1.15;
+      p.spin -= dec*dt;
+
+      // rotation: even a dying plate keeps turning, slower
+      const sp = (0.7 + p.spin*2.4);
+      p.ang += sp*dt;
+      p.wob += dt*(2.2 + (1-clamp(p.spin/0.6,0,1))*5.0);
+
+      if(p.cpop>0) p.cpop-=dt;
+
+      if(p.spin<=0){
+        // fall & shatter
+        p.alive=false;
+        const cx=slotX[p.slot], cy=slotPivotY[p.slot];
+        shatter(cx,cy);
+        combo=0;
+        lives--;
+        addFloat(cx, cy-plateRy*3, '割れた', '#ff5566', 1.1);
+        if(lives<=0){
+          state='over';
+          if(score>best){ best=score; localStorage.setItem('saramawashi_best',String(best)); }
+        }
+      }
+    }
+
+    // survival trickle
+    if(state==='play') score += dt*5;
+
+    // particles
+    for(let i=particles.length-1;i>=0;i--){
+      const q=particles[i]; q.life-=dt;
+      if(q.life<=0){ particles.splice(i,1); continue; }
+      if(q.ring){ q.r += dt*plateRx*4; }
+      else { q.x+=q.vx*dt; q.y+=q.vy*dt; q.vy+=260*dt; q.vx*=0.98; }
+    }
+    for(let i=shards.length-1;i>=0;i--){
+      const s=shards[i]; s.life-=dt;
+      if(s.life<=0){ shards.splice(i,1); continue; }
+      s.x+=s.vx*dt; s.y+=s.vy*dt; s.vy+=620*dt; s.rot+=s.vr*dt; s.vx*=0.99;
+    }
+    for(let i=floats.length-1;i>=0;i--){
+      const f=floats[i]; f.life-=dt; f.y-=22*dt;
+      if(f.life<=0) floats.splice(i,1);
+    }
+
+    if(shakeT>0) shakeT-=dt;
+    if(flashT>0) flashT-=dt;
+  }
+
+  function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+  function lerp(a,b,t){ return a+(b-a)*t; }
+
+  // ---- render ----
+  function plateColor(spin){
+    if(spin>=0.6) return {r:255,g:210,b:74};      // gold, stable
+    if(spin>=0.32){                                // warming
+      const t=(0.6-spin)/0.28;
+      return {r:255,g:Math.round(lerp(210,150,t)),b:Math.round(lerp(74,60,t))};
+    }
+    return {r:255,g:77,b:94};                       // red, danger
+  }
+
+  function draw(){
+    ctx.save();
+    if(shakeT>0){
+      const m=shakeMag*(shakeT/0.4);
+      ctx.translate((Math.random()-0.5)*m,(Math.random()-0.5)*m);
+    }
+
+    // background
+    const bg=ctx.createLinearGradient(0,0,0,H);
+    bg.addColorStop(0,'#160f24');
+    bg.addColorStop(0.55,'#0c0817');
+    bg.addColorStop(1,'#070510');
+    ctx.fillStyle=bg; ctx.fillRect(-30,-30,W+60,H+60);
+
+    // festival lantern glows
+    lantern(W*0.16, H*0.13, 70, 'rgba(255,150,70,0.16)');
+    lantern(W*0.86, H*0.10, 80, 'rgba(255,110,90,0.14)');
+    lantern(W*0.5,  H*0.02, 120,'rgba(255,190,120,0.07)');
+
+    // floor
+    const fg=ctx.createLinearGradient(0,floorY,0,H);
+    fg.addColorStop(0,'rgba(60,40,70,0.5)');
+    fg.addColorStop(1,'rgba(20,12,28,0)');
+    ctx.fillStyle=fg; ctx.fillRect(0,floorY,W,H-floorY);
+    ctx.strokeStyle='rgba(150,110,170,0.25)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(0,floorY); ctx.lineTo(W,floorY); ctx.stroke();
+
+    // plates + sticks
+    for(const p of plates){
+      if(!p.alive) continue;
+      drawStickPlate(p);
+    }
+
+    // particles
+    for(const q of particles){
+      if(q.ring){
+        ctx.save();
+        ctx.globalAlpha=Math.max(0,q.life/q.max);
+        ctx.strokeStyle=q.col; ctx.lineWidth=3;
+        ctx.beginPath(); ctx.ellipse(q.x,q.y,q.r,q.r*0.4,0,0,6.2832); ctx.stroke();
+        ctx.restore();
+      } else {
+        ctx.globalAlpha=Math.max(0,q.life/q.max);
+        ctx.fillStyle=q.col;
+        ctx.beginPath(); ctx.arc(q.x,q.y,q.size,0,6.2832); ctx.fill();
+      }
+    }
+    ctx.globalAlpha=1;
+
+    // shards
+    for(const s of shards){
+      ctx.save();
+      ctx.globalAlpha=Math.max(0,s.life/s.max);
+      ctx.translate(s.x,s.y); ctx.rotate(s.rot);
+      ctx.fillStyle='#ffd24a';
+      ctx.beginPath();
+      ctx.moveTo(-s.s,0); ctx.lineTo(s.s*0.4,-s.s*0.8); ctx.lineTo(s.s,s.s*0.3);
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+    ctx.globalAlpha=1;
+
+    // floating text
+    for(const f of floats){
+      ctx.save();
+      ctx.globalAlpha=Math.max(0,Math.min(1,f.life/0.4));
+      ctx.fillStyle=f.col;
+      ctx.font='700 18px -apple-system,sans-serif';
+      ctx.textAlign='center';
+      ctx.fillText(f.txt,f.x,f.y);
+      ctx.restore();
+    }
+
+    // HUD
+    drawHud();
+
+    // hint
+    if(hintT>0 && state==='play'){
+      ctx.save();
+      ctx.globalAlpha=Math.min(1,hintT/1.2)*0.8;
+      ctx.fillStyle='#cbb8e0';
+      ctx.font='600 15px -apple-system,sans-serif';
+      ctx.textAlign='center';
+      ctx.fillText('ふらつく皿の竿をタップして回し直す',W/2,H*0.80);
+      ctx.fillText('元気な皿を叩くと回しすぎ',W/2,H*0.80+22);
+      ctx.restore();
+    }
+
+    // flash
+    if(flashT>0){
+      ctx.fillStyle='rgba(255,90,110,'+(flashT*1.4)+')';
+      ctx.fillRect(-30,-30,W+60,H+60);
+    }
+
+    ctx.restore();
+
+    if(state==='over') drawOver();
+  }
+
+  function lantern(x,y,r,col){
+    const g=ctx.createRadialGradient(x,y,0,x,y,r);
+    g.addColorStop(0,col);
+    g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x,y,r,0,6.2832); ctx.fill();
+  }
+
+  function drawStickPlate(p){
+    const cx=slotX[p.slot], cy=slotPivotY[p.slot];
+    const en=p.enter;
+    const c=plateColor(p.spin);
+    const colS='rgb('+c.r+','+c.g+','+c.b+')';
+
+    // wobble grows as spin falls
+    const health=clamp(p.spin/0.6,0,1);
+    const wobAmp=(1-health)*0.34 + 0.015;
+    const lean=Math.sin(p.wob)*wobAmp;
+    const sway=Math.sin(p.wob*0.7)*(1-health)*plateRx*0.32;
+
+    // stick (bamboo)
+    ctx.save();
+    ctx.strokeStyle='rgba(190,150,95,0.9)';
+    ctx.lineWidth=Math.max(3,plateRx*0.10);
+    ctx.lineCap='round';
+    ctx.beginPath();
+    ctx.moveTo(cx, floorY);
+    ctx.quadraticCurveTo(cx+sway*0.4, (floorY+cy)/2, cx+sway, cy);
+    ctx.stroke();
+    // bamboo node ticks
+    ctx.strokeStyle='rgba(120,90,55,0.8)';
+    ctx.lineWidth=Math.max(2,plateRx*0.06);
+    for(let k=1;k<=3;k++){
+      const tt=k/4;
+      const nx=lerp(cx, cx+sway, tt);
+      const ny=lerp(floorY, cy, tt);
+      ctx.beginPath(); ctx.moveTo(nx-4,ny); ctx.lineTo(nx+4,ny); ctx.stroke();
+    }
+    ctx.restore();
+
+    // plate
+    ctx.save();
+    ctx.translate(cx+sway, cy);
+    ctx.rotate(lean);
+    ctx.scale(en, en);
+
+    const rx=plateRx, ry=plateRy;
+
+    // glow halo
+    ctx.shadowColor=colS;
+    ctx.shadowBlur=p.spin<0.32 ? (10+Math.sin(elapsed*16)*8) : 14;
+
+    // plate body
+    const pg=ctx.createRadialGradient(0,-ry*0.3,ry*0.2,0,0,rx);
+    pg.addColorStop(0,'rgba(40,30,55,0.95)');
+    pg.addColorStop(0.7,'rgba(26,18,38,0.95)');
+    pg.addColorStop(1,'rgba(16,10,24,0.95)');
+    ctx.fillStyle=pg;
+    ctx.beginPath(); ctx.ellipse(0,0,rx,ry,0,0,6.2832); ctx.fill();
+
+    // rim
+    ctx.shadowBlur=0;
+    ctx.strokeStyle=colS;
+    ctx.lineWidth=Math.max(2.5,rx*0.07);
+    ctx.beginPath(); ctx.ellipse(0,0,rx,ry,0,0,6.2832); ctx.stroke();
+
+    // spinning motif: 3 arc ticks + center disc
+    ctx.strokeStyle=colS;
+    ctx.lineWidth=Math.max(2,rx*0.05);
+    for(let k=0;k<3;k++){
+      const a=p.ang + k*2.094;
+      ctx.beginPath();
+      ctx.ellipse(0,0,rx*0.78,ry*0.78,0, a, a+0.7);
+      ctx.stroke();
+    }
+    // center hub
+    ctx.fillStyle=colS;
+    ctx.beginPath(); ctx.ellipse(0,0,rx*0.16,ry*0.16,0,0,6.2832); ctx.fill();
+    // a painted dot to read rotation
+    ctx.fillStyle='rgba(255,255,255,0.85)';
+    ctx.beginPath();
+    ctx.ellipse(Math.cos(p.ang)*rx*0.55, Math.sin(p.ang)*ry*0.55, rx*0.07, ry*0.13,0,0,6.2832);
+    ctx.fill();
+
+    ctx.restore();
+
+    // combo pop
+    if(p.cpop>0){
+      ctx.save();
+      ctx.globalAlpha=clamp(p.cpop/0.4,0,1);
+      ctx.fillStyle='#ffe79a';
+      ctx.font='800 20px -apple-system,sans-serif';
+      ctx.textAlign='center';
+      ctx.fillText('x'+p.cval, cx+sway, cy-plateRy*2.4 - (1-p.cpop/0.7)*14);
+      ctx.restore();
+    }
+  }
+
+  function drawHud(){
+    // score
+    ctx.fillStyle='#f4ead8';
+    ctx.font='800 30px -apple-system,sans-serif';
+    ctx.textAlign='center';
+    ctx.fillText(String(Math.floor(score)), W/2, H*0.085);
+    ctx.fillStyle='rgba(200,180,210,0.55)';
+    ctx.font='600 12px -apple-system,sans-serif';
+    ctx.fillText('BEST '+best, W/2, H*0.085+18);
+
+    // combo
+    if(combo>1){
+      ctx.fillStyle='#ffd24a';
+      ctx.font='800 18px -apple-system,sans-serif';
+      ctx.fillText('COMBO x'+combo, W/2, H*0.085+40);
+    }
+
+    // lives (intact plates icons)
+    const ly=H*0.085;
+    for(let i=0;i<3;i++){
+      const lx=W-26-i*26;
+      ctx.beginPath();
+      ctx.ellipse(lx,ly,9,4.2,0,0,6.2832);
+      if(i<lives){ ctx.fillStyle='#ffd24a'; ctx.fill(); }
+      else { ctx.strokeStyle='rgba(255,210,74,0.3)'; ctx.lineWidth=1.5; ctx.stroke(); }
+    }
+  }
+
+  function drawOver(){
+    ctx.fillStyle='rgba(8,5,14,0.78)';
+    ctx.fillRect(0,0,W,H);
+    ctx.textAlign='center';
+    ctx.fillStyle='#ffd24a';
+    ctx.font='800 30px -apple-system,sans-serif';
+    ctx.fillText('総崩れ', W/2, H*0.40);
+    ctx.fillStyle='#f4ead8';
+    ctx.font='800 46px -apple-system,sans-serif';
+    ctx.fillText(String(Math.floor(score)), W/2, H*0.40+58);
+    ctx.fillStyle='rgba(200,180,210,0.7)';
+    ctx.font='600 15px -apple-system,sans-serif';
+    ctx.fillText('BEST  '+best, W/2, H*0.40+90);
+    ctx.fillStyle='rgba(230,220,235,0.85)';
+    ctx.font='600 16px -apple-system,sans-serif';
+    ctx.fillText('タップでもう一度', W/2, H*0.40+140);
+  }
+
+  // ---- loop ----
+  let last=0;
+  function frame(ts){
+    if(!last) last=ts;
+    let dt=(ts-last)/1000; last=ts;
+    if(dt>0.05) dt=0.05;
+    if(state==='play') update(dt);
+    else { // keep effects animating on game over
+      for(let i=particles.length-1;i>=0;i--){const q=particles[i];q.life-=dt;if(q.life<=0){particles.splice(i,1);continue;}if(q.ring){q.r+=dt*plateRx*4;}else{q.x+=q.vx*dt;q.y+=q.vy*dt;q.vy+=260*dt;}}
+      for(let i=shards.length-1;i>=0;i--){const s=shards[i];s.life-=dt;if(s.life<=0){shards.splice(i,1);continue;}s.x+=s.vx*dt;s.y+=s.vy*dt;s.vy+=620*dt;s.rot+=s.vr*dt;}
+      if(shakeT>0)shakeT-=dt; if(flashT>0)flashT-=dt;
+    }
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  resize();
+  reset();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
