@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#120c1e">
+<title>Fukuwarai</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#120c1e;
+    font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif; }
+  #wrap { position:fixed; inset:0; touch-action:none; }
+  canvas { display:block; width:100%; height:100%; }
+
+  .hud { position:fixed; top:0; left:0; right:0; padding:13px 18px;
+    display:flex; align-items:center; justify-content:space-between;
+    color:#f3e6c8; font-size:15px; letter-spacing:.06em; pointer-events:none;
+    text-shadow:0 0 8px rgba(255,200,120,.35); z-index:5; }
+  .hud a { pointer-events:auto; color:#e9cf9a; text-decoration:none;
+    font-size:14px; opacity:.75; padding:6px 4px; }
+  .hud .stat { font-weight:700; font-variant-numeric:tabular-nums; }
+  .bar-wrap { position:fixed; top:44px; left:18px; right:18px; height:5px;
+    border-radius:3px; background:rgba(255,255,255,.07); overflow:hidden; z-index:5;
+    pointer-events:none; }
+  #bar { height:100%; width:100%; border-radius:3px;
+    background:linear-gradient(90deg,#ffd76a,#ff9a5a);
+    box-shadow:0 0 10px rgba(255,190,110,.6); transition:width .15s linear; }
+
+  .screen { position:fixed; inset:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center; z-index:10;
+    background:radial-gradient(circle at 50% 38%,rgba(40,26,60,.55),rgba(12,8,20,.94));
+    color:#f3e6c8; opacity:0; pointer-events:none; transition:opacity .4s; }
+  .screen.show { opacity:1; pointer-events:auto; }
+  .screen h1 { font-size:40px; letter-spacing:.18em; font-weight:800;
+    color:#ffe6a8; text-shadow:0 0 22px rgba(255,190,110,.55); }
+  .screen .sub { margin-top:14px; font-size:15px; opacity:.7; letter-spacing:.12em; line-height:1.9; }
+  .screen .big { margin-top:20px; font-size:54px; font-weight:800; color:#ffd76a;
+    text-shadow:0 0 26px rgba(255,190,110,.5); font-variant-numeric:tabular-nums; }
+  .screen .rank { margin-top:8px; font-size:24px; font-weight:800; letter-spacing:.22em; }
+  .tapnote { margin-top:34px; font-size:14px; opacity:.65; letter-spacing:.14em;
+    animation:bln 1.7s ease-in-out infinite; }
+  @keyframes bln { 0%,100%{opacity:.3} 50%{opacity:.8} }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="cv"></canvas></div>
+
+<div class="hud">
+  <a href="../../index.html">‹ もどる</a>
+  <div class="stat"><span id="score">0</span> 福</div>
+  <div class="stat">のこり <span id="time">75</span></div>
+</div>
+<div class="bar-wrap"><div id="bar"></div></div>
+
+<div class="screen show" id="sTitle">
+  <h1>福笑い</h1>
+  <div class="sub">めかくしのまま 顔をつくる<br>まゆ・め・はな・くち を そっと置いて</div>
+  <div class="tapnote">タップしてはじめる</div>
+</div>
+
+<div class="screen" id="sOver">
+  <div class="sub">きょうの福</div>
+  <div class="big" id="finalScore">0</div>
+  <div class="rank" id="finalRank">大吉</div>
+  <div class="sub" id="finalSub"></div>
+  <div class="tapnote">タップしてもう一度</div>
+</div>
+
+<script>
+(function(){
+  const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+  let W=0,H=0,DPR=1;
+  const elScore=document.getElementById('score'),
+        elTime=document.getElementById('time'),
+        elBar=document.getElementById('bar'),
+        sTitle=document.getElementById('sTitle'),
+        sOver=document.getElementById('sOver');
+
+  // ---- layout ----
+  let faceCX,faceCY,faceRX,faceRY,trayTop,cardCX,cardCY;
+  function resize(){
+    DPR=Math.min(window.devicePixelRatio||1,2.5);
+    W=window.innerWidth; H=window.innerHeight;
+    cv.width=W*DPR; cv.height=H*DPR; cv.style.width=W+'px'; cv.style.height=H+'px';
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    const topPad=70, trayH=148;
+    trayTop=H-trayH;
+    const avail=trayTop-topPad;
+    faceCX=W/2;
+    faceCY=topPad+avail*0.46;
+    faceRX=Math.min(W*0.40,222);
+    faceRY=faceRX*1.16;
+    cardCX=W/2; cardCY=H-trayH/2;
+  }
+  window.addEventListener('resize',resize); resize();
+
+  // ---- parts definition (ideal offsets in face-radius units) ----
+  const PARTS=[
+    {key:'browL', label:'まゆ', ix:-0.42, iy:-0.34},
+    {key:'browR', label:'まゆ', ix: 0.42, iy:-0.34},
+    {key:'eyeL',  label:'め',   ix:-0.40, iy:-0.11},
+    {key:'eyeR',  label:'め',   ix: 0.40, iy:-0.11},
+    {key:'nose',  label:'はな', ix: 0.00, iy: 0.14},
+    {key:'mouth', label:'くち', ix: 0.00, iy: 0.46},
+  ];
+  function idealPos(p){ return {x:faceCX+p.ix*faceRX, y:faceCY+p.iy*faceRY}; }
+
+  // ---- state ----
+  let state='title';        // title | placing | reveal | over
+  let total=0, faces=0, bestRankIdx=-1;
+  let TOTAL_MS=75000, timeLeft=TOTAL_MS, lastTick=0, lastFaceFlag=false;
+  let curIdx=0;             // which part index being placed
+  let placed=[];            // {key,x,y, vx scoring}
+  let drag=null;            // {x,y, grabbed:bool}
+  let ripples=[], petals=[];
+  let revealStart=0, faceScore=0, faceRankIdx=0;
+
+  const RANKS=[
+    {n:'凶',  c:'#cf9a9a'},
+    {n:'末吉',c:'#ff8f7a'},
+    {n:'小吉',c:'#ffab6a'},
+    {n:'中吉',c:'#ffc56a'},
+    {n:'大吉',c:'#ffe07a'},
+  ];
+  function rankOf(s){ return s>=85?4 : s>=66?3 : s>=46?2 : s>=26?1 : 0; }
+
+  function vib(p){ if(navigator.vibrate) navigator.vibrate(p); }
+
+  // ---- flow ----
+  function startGame(){
+    total=0; faces=0; bestRankIdx=-1; timeLeft=TOTAL_MS; lastFaceFlag=false;
+    petals.length=0;
+    sTitle.classList.remove('show'); sOver.classList.remove('show');
+    newFace();
+  }
+  function newFace(){
+    if(timeLeft<=0){ gameOver(); return; }
+    state='placing'; curIdx=0; placed=[]; drag=null; ripples.length=0;
+    lastTick=performance.now();
+  }
+  function placeCurrent(x,y){
+    const p=PARTS[curIdx];
+    placed.push({key:p.key,x:x,y:y});
+    ripples.push({x:x,y:y,r:8,a:1});
+    vib(12);
+    curIdx++;
+    if(curIdx>=PARTS.length) beginReveal();
+  }
+  function beginReveal(){
+    // score
+    let sum=0;
+    for(let i=0;i<PARTS.length;i++){
+      const id=idealPos(PARTS[i]), pl=placed[i];
+      const dx=(pl.x-id.x)/faceRX, dy=(pl.y-id.y)/faceRY;
+      const d=Math.sqrt(dx*dx+dy*dy);
+      const s=Math.max(0,Math.min(100,Math.round(100*(1-d/0.95))));
+      placed[i].s=s; sum+=s;
+    }
+    faceScore=Math.round(sum/PARTS.length);
+    faceRankIdx=rankOf(faceScore);
+    total+=faceScore; faces++;
+    if(faceRankIdx>bestRankIdx) bestRankIdx=faceRankIdx;
+    elScore.textContent=total;
+    state='reveal'; revealStart=performance.now();
+    vib([18,40,28]);
+  }
+  function gameOver(){
+    state='over';
+    document.getElementById('finalScore').textContent=total;
+    const ri=bestRankIdx<0?0:bestRankIdx;
+    const fr=document.getElementById('finalRank');
+    fr.textContent=RANKS[ri].n; fr.style.color=RANKS[ri].c;
+    fr.style.textShadow='0 0 22px '+RANKS[ri].c+'88';
+    document.getElementById('finalSub').textContent=faces+' 顔つくった';
+    sOver.classList.add('show');
+  }
+
+  // ---- input ----
+  function pos(e){ const t=e.touches?e.touches[0]:e; return {x:t.clientX,y:t.clientY}; }
+  function down(e){
+    e.preventDefault();
+    if(state==='reveal'){
+      if(performance.now()-revealStart>1500){
+        if(lastFaceFlag||timeLeft<=0){ gameOver(); } else { newFace(); }
+      }
+      return;
+    }
+    if(state==='placing'){
+      const p=pos(e);
+      // grab from anywhere; part rides the finger
+      drag={x:p.x,y:p.y,grab:true};
+      vib(7);
+    }
+  }
+  function move(e){
+    if(state!=='placing'||!drag) return;
+    e.preventDefault();
+    const p=pos(e); drag.x=p.x; drag.y=p.y;
+  }
+  function up(e){
+    if(state!=='placing'||!drag) return;
+    e.preventDefault();
+    if(drag.y<trayTop-6){
+      placeCurrent(drag.x, drag.y);
+    } else {
+      vib(4); // cancelled back to tray
+    }
+    drag=null;
+  }
+  const wrap=document.getElementById('wrap');
+  wrap.addEventListener('touchstart',down,{passive:false});
+  wrap.addEventListener('touchmove',move,{passive:false});
+  wrap.addEventListener('touchend',up,{passive:false});
+  wrap.addEventListener('mousedown',down);
+  wrap.addEventListener('mousemove',move);
+  wrap.addEventListener('mouseup',up);
+  sTitle.addEventListener('click',startGame);
+  sOver.addEventListener('click',startGame);
+
+  // ---- drawing helpers ----
+  function drawFaceBase(reveal){
+    // okame face (warm cream)
+    ctx.save();
+    ctx.translate(faceCX,faceCY);
+    const g=ctx.createRadialGradient(0,-faceRY*0.2,faceRX*0.2,0,0,faceRY*1.05);
+    g.addColorStop(0,'#fbf0dd'); g.addColorStop(.7,'#f3e3c4'); g.addColorStop(1,'#e6d0a8');
+    ctx.fillStyle=g;
+    ctx.beginPath(); ctx.ellipse(0,0,faceRX,faceRY,0,0,Math.PI*2); ctx.fill();
+    ctx.lineWidth=3; ctx.strokeStyle='rgba(120,80,50,.30)'; ctx.stroke();
+    // hair top arc
+    ctx.fillStyle='#211722';
+    ctx.beginPath();
+    ctx.ellipse(0,-faceRY*0.86,faceRX*0.96,faceRY*0.42,0,Math.PI,Math.PI*2);
+    ctx.fill();
+    // blush cheeks (intensity grows with reveal score)
+    const bl=reveal? 0.34+0.5*(faceScore/100) : 0.30;
+    for(const s of [-1,1]){
+      const cg=ctx.createRadialGradient(s*faceRX*0.52,faceRY*0.16,2,s*faceRX*0.52,faceRY*0.16,faceRX*0.40);
+      cg.addColorStop(0,'rgba(244,120,120,'+bl+')');
+      cg.addColorStop(1,'rgba(244,120,120,0)');
+      ctx.fillStyle=cg;
+      ctx.beginPath(); ctx.arc(s*faceRX*0.52,faceRY*0.16,faceRX*0.40,0,Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // draw a single part centred at (0,0); scale uniform; t for tiny anim
+  function drawPart(key,scale,happy){
+    ctx.save(); ctx.scale(scale,scale);
+    ctx.lineCap='round'; ctx.lineJoin='round';
+    if(key==='browL'||key==='browR'){
+      const dir=key==='browL'?1:-1;
+      ctx.strokeStyle='#3a2a22'; ctx.lineWidth=7;
+      ctx.beginPath();
+      ctx.moveTo(-22*dir,6); ctx.quadraticCurveTo(0,-14,22*dir,2); ctx.stroke();
+    } else if(key==='eyeL'||key==='eyeR'){
+      ctx.strokeStyle='#241a16'; ctx.lineWidth=6;
+      ctx.beginPath();
+      ctx.moveTo(-17,2); ctx.quadraticCurveTo(0, happy?12:8, 17,2); ctx.stroke();
+      ctx.fillStyle='#241a16';
+      ctx.beginPath(); ctx.arc(0,1,3.2,0,Math.PI*2); ctx.fill();
+    } else if(key==='nose'){
+      ctx.strokeStyle='#a8714a'; ctx.lineWidth=5;
+      ctx.beginPath();
+      ctx.moveTo(0,-16); ctx.quadraticCurveTo(7,12,0,16);
+      ctx.moveTo(0,16); ctx.quadraticCurveTo(-6,17,-9,12); ctx.stroke();
+    } else if(key==='mouth'){
+      ctx.fillStyle='#d6453f';
+      ctx.beginPath();
+      const w=happy?20:16, h=happy?15:11;
+      ctx.moveTo(-w,-2);
+      ctx.quadraticCurveTo(0,-h*0.5,w,-2);
+      ctx.quadraticCurveTo(0,h,-w,-2);
+      ctx.fill();
+      ctx.fillStyle='#fff4f0';
+      ctx.beginPath(); ctx.ellipse(0,-1,w*0.5,2.4,0,0,Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function spawnPetals(){
+    if(petals.length>54) return;
+    petals.push({x:Math.random()*W, y:-20, vy:0.7+Math.random()*1.0,
+      sw:Math.random()*Math.PI*2, sp:0.02+Math.random()*0.03,
+      r:5+Math.random()*5, rot:Math.random()*Math.PI,
+      hue:Math.random()<0.5? '#ffd9a0':'#ffb7c8'});
+  }
+  function drawPetal(p){
+    ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.rot);
+    ctx.fillStyle=p.hue; ctx.globalAlpha=0.85;
+    ctx.beginPath(); ctx.ellipse(0,0,p.r,p.r*0.55,0,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+
+  // ---- main loop ----
+  let prev=performance.now();
+  function frame(now){
+    const dt=Math.min(50,now-prev); prev=now;
+
+    // timer (only counts while actively placing)
+    if(state==='placing'){
+      timeLeft-=dt;
+      if(timeLeft<=0){ timeLeft=0; lastFaceFlag=true; }
+    }
+    elTime.textContent=Math.ceil(timeLeft/1000);
+    elBar.style.width=(timeLeft/TOTAL_MS*100)+'%';
+
+    // background wash
+    const bg=ctx.createLinearGradient(0,0,0,H);
+    bg.addColorStop(0,'#160f24'); bg.addColorStop(1,'#0d0917');
+    ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+
+    if(state==='placing'||state==='reveal'){
+      drawFaceBase(state==='reveal');
+
+      // placed parts: hidden during placing (blindfold), shown at reveal
+      if(state==='placing'){
+        for(const pl of placed){
+          ctx.save();
+          const gd=ctx.createRadialGradient(pl.x,pl.y,0,pl.x,pl.y,16);
+          gd.addColorStop(0,'rgba(255,210,130,.55)');
+          gd.addColorStop(1,'rgba(255,210,130,0)');
+          ctx.fillStyle=gd;
+          ctx.beginPath(); ctx.arc(pl.x,pl.y,16,0,Math.PI*2); ctx.fill();
+          ctx.restore();
+        }
+        // blindfold veil over the face area
+        ctx.save();
+        const vg=ctx.createRadialGradient(faceCX,faceCY,faceRX*0.2,faceCX,faceCY,faceRY*1.5);
+        vg.addColorStop(0,'rgba(14,9,22,.62)');
+        vg.addColorStop(.6,'rgba(14,9,22,.74)');
+        vg.addColorStop(1,'rgba(14,9,22,.30)');
+        ctx.fillStyle=vg; ctx.fillRect(0,0,W,trayTop);
+        // faint guide oval through the cloth
+        ctx.translate(faceCX,faceCY);
+        ctx.strokeStyle='rgba(255,225,170,.16)'; ctx.lineWidth=2;
+        ctx.beginPath(); ctx.ellipse(0,0,faceRX,faceRY,0,0,Math.PI*2); ctx.stroke();
+        ctx.restore();
+      }
+
+      // ripples
+      for(let i=ripples.length-1;i>=0;i--){
+        const r=ripples[i]; r.r+=2.4; r.a-=0.035;
+        if(r.a<=0){ ripples.splice(i,1); continue; }
+        ctx.strokeStyle='rgba(255,210,140,'+r.a+')'; ctx.lineWidth=2;
+        ctx.beginPath(); ctx.arc(r.x,r.y,r.r,0,Math.PI*2); ctx.stroke();
+      }
+    }
+
+    if(state==='placing'){
+      // tray base
+      ctx.fillStyle='rgba(255,255,255,.035)';
+      ctx.fillRect(0,trayTop,W,H-trayTop);
+      ctx.strokeStyle='rgba(255,210,140,.18)'; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(0,trayTop); ctx.lineTo(W,trayTop); ctx.stroke();
+
+      const p=PARTS[curIdx];
+      // label of what to place (diegetic, no instructions)
+      ctx.fillStyle='rgba(243,230,200,.55)';
+      ctx.font='13px sans-serif'; ctx.textAlign='center';
+      ctx.fillText(p.label, cardCX, trayTop+26);
+
+      if(drag){
+        // part rides the finger, lifted & glowing
+        ctx.save();
+        ctx.translate(drag.x,drag.y-26);
+        ctx.shadowColor='rgba(255,200,120,.6)'; ctx.shadowBlur=18;
+        drawPart(p.key,1.25,false);
+        ctx.restore();
+      } else {
+        // resting card with the part
+        ctx.save();
+        ctx.translate(cardCX,cardCY+10);
+        const cw=92,ch=72;
+        ctx.fillStyle='rgba(255,240,210,.10)';
+        roundRect(-cw/2,-ch/2,cw,ch,12); ctx.fill();
+        ctx.strokeStyle='rgba(255,210,140,.35)'; ctx.lineWidth=1.5;
+        roundRect(-cw/2,-ch/2,cw,ch,12); ctx.stroke();
+        const pulse=1+0.05*Math.sin(now/300);
+        drawPart(p.key,1.05*pulse,false);
+        ctx.restore();
+      }
+    }
+
+    if(state==='reveal'){
+      const el=now-revealStart;
+      const happy=faceScore>=66;
+      // staggered bounce-in of each part
+      for(let i=0;i<placed.length;i++){
+        const pl=placed[i];
+        const t=(el-i*90)/360;
+        if(t<=0) continue;
+        let sc;
+        if(t<1){ sc=t<0.7? (t/0.7)*1.18 : 1.18-((t-0.7)/0.3)*0.18; }
+        else sc=1;
+        ctx.save(); ctx.translate(pl.x,pl.y);
+        drawPart(pl.key, sc, happy);
+        ctx.restore();
+      }
+
+      // petals after parts in
+      if(el>500){ if(Math.random()<0.5) spawnPetals(); }
+      for(let i=petals.length-1;i>=0;i--){
+        const q=petals[i];
+        q.y+=q.vy; q.sw+=q.sp; q.x+=Math.sin(q.sw)*0.8; q.rot+=0.02;
+        if(q.y>H+20){ petals.splice(i,1); continue; }
+        drawPetal(q);
+      }
+
+      // fortune stamp (hanko) thunk
+      if(el>900){
+        const st=Math.min(1,(el-900)/300);
+        const sc= st<1 ? 2.1-1.1*st : 1;
+        const rk=RANKS[faceRankIdx];
+        ctx.save();
+        ctx.translate(W/2, faceCY+faceRY+58);
+        ctx.rotate(-0.12);
+        ctx.scale(sc,sc);
+        ctx.globalAlpha=Math.min(1,st*1.3);
+        ctx.fillStyle='#d6453f';
+        ctx.beginPath(); ctx.arc(0,0,40,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='#1a0d10';
+        ctx.beginPath(); ctx.arc(0,0,40,0,Math.PI*2);
+        ctx.arc(0,0,33,0,Math.PI*2,true); ctx.fill();
+        ctx.fillStyle='#fff1ec';
+        ctx.font='800 '+(rk.n.length>1?22:30)+'px "Hiragino Mincho ProN",serif';
+        ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText(rk.n,0,1);
+        ctx.restore();
+        if(el>=900 && el<920) vib([10,30,60]);
+      }
+      if(el>1450){
+        ctx.fillStyle='rgba(243,230,200,.6)';
+        ctx.font='14px sans-serif'; ctx.textAlign='center';
+        const msg=(lastFaceFlag||timeLeft<=0)?'タップして結果へ':'タップして次の顔';
+        ctx.fillText(msg, W/2, H-46);
+      }
+    }
+
+    requestAnimationFrame(frame);
+  }
+  function roundRect(x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
