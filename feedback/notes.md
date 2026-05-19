@@ -28,5 +28,11 @@
   例: `gh pr create ...` の後に `gh pr merge --merge --delete-branch` を実行
 - Mergeできない場合（コンフリクト等）はその旨を `feedback/notes.md` の末尾に簡潔に記録して終了
 
+## 運用ログ
+
+- 2026-05-19: 新作 `Hata`(旗あげ反射ゲーム)を作成し、ブランチ `claude/elegant-edison-hww3S` にコミット&プッシュ済み。
+  ただし本セッション環境では `gh` CLI も GitHub MCP ツールも利用不可(remote はローカルプロキシ)のため、
+  PR 作成および main への自動 Merge は実行できなかった。要手動 PR 作成・Merge。
+
 ## 履歴
 
