@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Bonshō - 梵鐘</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;touch-action:none}
+  html,body{width:100%;height:100%;overflow:hidden;background:#0a0608;color:#e9d3a8;font-family:"Hiragino Mincho ProN","Yu Mincho",serif}
+  #stage{position:fixed;inset:0;overflow:hidden;background:radial-gradient(ellipse at 50% 30%,#1a1213 0%,#0a0608 60%,#050304 100%)}
+  canvas{position:absolute;inset:0;display:block;width:100%;height:100%}
+  #hud{position:absolute;top:max(12px,env(safe-area-inset-top));left:0;right:0;padding:0 18px;display:flex;justify-content:space-between;align-items:flex-start;pointer-events:none;font-size:14px;letter-spacing:.18em;color:#cbb284;text-shadow:0 0 8px #000}
+  #hud .lbl{opacity:.55;font-size:10px;letter-spacing:.3em}
+  #hud .val{font-size:22px;font-weight:300;letter-spacing:.12em;color:#f3deae}
+  #judge{position:absolute;left:0;right:0;top:38%;text-align:center;font-size:30px;letter-spacing:.4em;color:#f3deae;text-shadow:0 0 18px #c79a4a,0 0 30px #6a3a18;pointer-events:none;opacity:0;transition:opacity .2s;font-weight:300}
+  #hint{position:absolute;left:0;right:0;bottom:18%;text-align:center;font-size:12px;letter-spacing:.4em;color:#8a7656;pointer-events:none;opacity:.8}
+  #back{position:absolute;top:max(10px,env(safe-area-inset-top));right:12px;width:36px;height:36px;line-height:34px;text-align:center;border:1px solid #5a4a32;border-radius:50%;color:#cbb284;text-decoration:none;font-size:14px;background:rgba(10,6,8,.6);pointer-events:auto;z-index:5}
+  #overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;background:radial-gradient(ellipse at center,rgba(40,22,12,.85),rgba(5,3,4,.95));color:#e9d3a8;text-align:center;padding:24px;z-index:4}
+  #overlay h1{font-weight:300;font-size:38px;letter-spacing:.5em;margin-bottom:8px;text-shadow:0 0 18px #c79a4a}
+  #overlay h2{font-weight:300;font-size:14px;letter-spacing:.4em;margin-bottom:32px;color:#8a7656}
+  #overlay .row{margin:4px 0;font-size:14px;letter-spacing:.25em;color:#cbb284}
+  #overlay .row b{color:#f3deae;font-weight:400;margin-left:14px}
+  #overlay button{margin-top:28px;background:none;border:1px solid #a07a3c;color:#f3deae;padding:10px 30px;font-size:14px;letter-spacing:.4em;font-family:inherit;cursor:pointer;border-radius:2px}
+  #overlay button:active{background:rgba(199,154,74,.2)}
+  #intro{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;color:#e9d3a8;text-align:center;padding:24px;z-index:6;background:radial-gradient(ellipse at center,rgba(40,22,12,.85),rgba(5,3,4,.96))}
+  #intro h1{font-weight:300;font-size:46px;letter-spacing:.6em;margin-bottom:8px;text-shadow:0 0 20px #c79a4a}
+  #intro h2{font-weight:300;font-size:12px;letter-spacing:.5em;margin-bottom:36px;color:#8a7656}
+  #intro p{font-size:13px;letter-spacing:.2em;line-height:2;color:#cbb284;max-width:280px}
+  #intro .start{margin-top:36px;font-size:13px;letter-spacing:.6em;color:#f3deae;border:1px solid #a07a3c;padding:12px 36px;border-radius:2px;animation:pulse 1.6s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:.7}50%{opacity:1}}
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="cv"></canvas>
+  <div id="hud">
+    <div><div class="lbl">打 / 計</div><div class="val"><span id="cur">0</span> / <span id="tot">9</span></div></div>
+    <div style="text-align:right"><div class="lbl">響</div><div class="val" id="score">0</div></div>
+  </div>
+  <div id="judge"></div>
+  <div id="hint">引いて 離す</div>
+  <a id="back" href="../../index.html" aria-label="back">←</a>
+  <div id="intro">
+    <h1>梵 鐘</h1>
+    <h2>BONSHŌ</h2>
+    <p>撞木を 指で右に引いて<br>静かに 離す<br>金輪が 重なる瞬間に<br>鐘へと 当てよ</p>
+    <div class="start" id="startBtn">は じ め る</div>
+  </div>
+  <div id="overlay">
+    <h1 id="ovTitle">満 願</h1>
+    <h2 id="ovSub">九つの 響き</h2>
+    <div class="row">響 <b id="ovScore">0</b></div>
+    <div class="row">至高 <b id="ovPerfect">0</b></div>
+    <div class="row">最大連 <b id="ovCombo">0</b></div>
+    <button id="again">も う 一 度</button>
+  </div>
+</div>
+<script>
+(()=>{
+'use strict';
+const cv=document.getElementById('cv');
+const ctx=cv.getContext('2d');
+let W=0,H=0,DPR=1;
+function resize(){
+  DPR=Math.min(window.devicePixelRatio||1,2);
+  W=window.innerWidth;H=window.innerHeight;
+  cv.width=Math.floor(W*DPR);cv.height=Math.floor(H*DPR);
+  cv.style.width=W+'px';cv.style.height=H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  layout();
+}
+window.addEventListener('resize',resize,{passive:true});
+
+const G={
+  state:'intro', // intro / play / over
+  score:0, combo:0, maxCombo:0,
+  perfectCount:0, hitCount:0,
+  beatIdx:0, totalBeats:9,
+};
+
+// Geometry
+const bell={cx:0,cy:0,w:0,h:0,vibe:0,vibeT:0};
+const shu={
+  pivotX:0,pivotY:0,L:0,
+  angle:0, angVel:0,
+  grabbed:false, grabAngle:0,
+  poleLen:0, poleR:0,
+  hitCooldown:0,
+};
+function layout(){
+  bell.w=Math.min(W*0.5,280);
+  bell.h=bell.w*1.25;
+  bell.cx=W*0.40;
+  bell.cy=H*0.30+bell.h*0.5;
+  shu.pivotX=W*0.78;
+  shu.pivotY=H*0.18;
+  shu.L=Math.min(H*0.42, bell.h*1.05);
+  shu.poleLen=Math.min(W*0.5, bell.w*0.95);
+  shu.poleR=Math.max(8, W*0.018);
+  // reset hanging angle to neutral (slightly toward bell to feel "ready")
+  if(G.state==='intro'){
+    shu.angle=0; shu.angVel=0;
+  }
+}
+resize();
+
+// Beat system
+let lastT=0;
+let beatPhase=0; // 0..1, target hit at 1
+const beatInterval=2400; // ms
+let beatActive=true;
+let pendingJudge=false;
+
+const judgeEl=document.getElementById('judge');
+const curEl=document.getElementById('cur');
+const totEl=document.getElementById('tot');
+const scoreEl=document.getElementById('score');
+const overlay=document.getElementById('overlay');
+const intro=document.getElementById('intro');
+
+function showJudge(text,color){
+  judgeEl.textContent=text;
+  judgeEl.style.color=color;
+  judgeEl.style.textShadow=`0 0 18px ${color},0 0 32px ${color}`;
+  judgeEl.style.opacity='1';
+  setTimeout(()=>{judgeEl.style.opacity='0';},700);
+}
+
+// Particles
+const particles=[];
+function spark(x,y,n,color,spread,speed){
+  for(let i=0;i<n;i++){
+    const a=Math.random()*Math.PI*2;
+    const s=speed*(0.4+Math.random()*0.8);
+    particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-1,
+      life:1,decay:0.012+Math.random()*0.02,color,size:1+Math.random()*spread});
+  }
+}
+// Sound rings expanding from bell
+const rings=[];
+function emitRing(strength){
+  rings.push({r:bell.w*0.45, vr:120+strength*2, life:1, decay:0.008, str:strength});
+}
+
+// Input
+let touchPos=null;
+function getXY(e){
+  const t=e.touches?e.touches[0]:e;
+  if(!t) return null;
+  return {x:t.clientX,y:t.clientY};
+}
+function pointInShumoku(x,y){
+  // compute pole bbox
+  const cx=shu.pivotX+shu.L*Math.sin(shu.angle);
+  const cy=shu.pivotY+shu.L*Math.cos(shu.angle);
+  // pole is horizontal from cx-poleLen to cx (left end is hitter)
+  const left=cx-shu.poleLen;
+  const right=cx;
+  if(x>=left-20 && x<=right+20 && y>=cy-30 && y<=cy+30) return true;
+  // also allow grabbing near the rope area
+  const ropeX=shu.pivotX+shu.L*0.6*Math.sin(shu.angle);
+  const ropeY=shu.pivotY+shu.L*0.6*Math.cos(shu.angle);
+  if(Math.hypot(x-ropeX,y-ropeY)<60) return true;
+  return false;
+}
+function onDown(e){
+  e.preventDefault();
+  if(G.state==='intro') return;
+  const p=getXY(e); if(!p) return;
+  if(pointInShumoku(p.x,p.y) || (p.x>shu.pivotX-W*0.35 && p.y>H*0.4)){
+    shu.grabbed=true;
+    touchPos=p;
+  }
+}
+function onMove(e){
+  e.preventDefault();
+  if(!shu.grabbed) return;
+  const p=getXY(e); if(!p) return;
+  touchPos=p;
+}
+function onUp(e){
+  e.preventDefault();
+  if(!shu.grabbed) return;
+  shu.grabbed=false;
+  touchPos=null;
+}
+cv.addEventListener('touchstart',onDown,{passive:false});
+cv.addEventListener('touchmove',onMove,{passive:false});
+cv.addEventListener('touchend',onUp,{passive:false});
+cv.addEventListener('touchcancel',onUp,{passive:false});
+cv.addEventListener('mousedown',onDown);
+window.addEventListener('mousemove',onMove);
+window.addEventListener('mouseup',onUp);
+
+// Start
+document.getElementById('startBtn').addEventListener('click',startGame);
+document.getElementById('startBtn').addEventListener('touchstart',(e)=>{e.preventDefault();startGame();},{passive:false});
+document.getElementById('again').addEventListener('click',startGame);
+
+function startGame(){
+  G.state='play';
+  G.score=0;G.combo=0;G.maxCombo=0;G.perfectCount=0;G.hitCount=0;
+  G.beatIdx=0;
+  beatPhase=0;
+  shu.angle=0;shu.angVel=0;shu.grabbed=false;
+  shu.hitCooldown=0;
+  bell.vibe=0;bell.vibeT=0;
+  particles.length=0;
+  rings.length=0;
+  intro.style.display='none';
+  overlay.style.display='none';
+  curEl.textContent='0';
+  totEl.textContent=G.totalBeats;
+  scoreEl.textContent='0';
+  pendingJudge=false;
+  beatActive=true;
+  lastT=performance.now();
+  requestAnimationFrame(loop);
+}
+
+function endGame(){
+  G.state='over';
+  document.getElementById('ovScore').textContent=G.score;
+  document.getElementById('ovPerfect').textContent=G.perfectCount;
+  document.getElementById('ovCombo').textContent=G.maxCombo;
+  // title based on score
+  let title='満 願', sub='九つの 響き';
+  if(G.score>=900){title='大 悟';sub='天 地 鳴 動';}
+  else if(G.score>=650){title='清 浄';sub='妙 音 朗 朗';}
+  else if(G.score>=350){title='平 安';sub='余 韻 漂 う';}
+  else {title='精 進';sub='更 に 修 業 を';}
+  document.getElementById('ovTitle').textContent=title;
+  document.getElementById('ovSub').textContent=sub;
+  overlay.style.display='flex';
+}
+
+// Physics + game loop
+function update(dt){
+  // Beat phase
+  if(beatActive){
+    beatPhase+=dt/beatInterval;
+    if(beatPhase>=1.35){
+      // missed window
+      if(!pendingJudge){
+        // beat passed
+      } else {
+        // shouldn't happen
+      }
+      // judge as miss if we never hit
+      // We'll judge miss when beatPhase passes 1.25 without a hit
+      onBeatMiss();
+      beatPhase=0;
+    }
+  }
+
+  // Shumoku
+  if(shu.grabbed && touchPos){
+    // Compute desired angle from pivot to touch
+    const dx=touchPos.x-shu.pivotX;
+    const dy=touchPos.y-shu.pivotY;
+    let target=Math.atan2(dx,dy); // 0 = straight down, + = right (since x grows right)
+    // Limit angle range: can pull right (positive) up to 1.1 rad, can't push past rest much
+    target=Math.max(-0.05, Math.min(1.15, target));
+    const prevAngle=shu.angle;
+    shu.angle = target;
+    shu.angVel = (shu.angle-prevAngle)/Math.max(dt,1);
+  } else {
+    // Pendulum physics: theta'' = -omega^2 * sin(theta)
+    // Period ~ 1.8s tuned for feel
+    const omega2 = 0.000013;
+    const acc = -omega2 * Math.sin(shu.angle);
+    shu.angVel += acc * dt;
+    shu.angVel *= Math.pow(0.9988, dt/16);
+    shu.angle += shu.angVel * dt;
+  }
+
+  // Collision with bell: shumoku tip (left end) crosses bell's right edge
+  const cx=shu.pivotX+shu.L*Math.sin(shu.angle);
+  const cy=shu.pivotY+shu.L*Math.cos(shu.angle);
+  const tipX=cx-shu.poleLen;
+  const tipY=cy;
+  const bellRight=bell.cx+bell.w*0.5;
+  shu.hitCooldown=Math.max(0,shu.hitCooldown-dt);
+  if(tipX<=bellRight && shu.angVel<0 && shu.hitCooldown<=0
+     && tipY>bell.cy-bell.h*0.45 && tipY<bell.cy+bell.h*0.45){
+    // collision
+    const speed=Math.abs(shu.angVel)*shu.L; // px/ms-ish
+    const impact=Math.min(2.5, speed*2);
+    // bounce
+    shu.angVel = Math.abs(shu.angVel) * 0.45;
+    // push out
+    shu.angle += 0.04;
+    shu.hitCooldown=200;
+    onBellHit(impact);
+  }
+
+  // Bell vibration
+  bell.vibe *= Math.pow(0.985, dt/16);
+  if(bell.vibe<0.02) bell.vibe=0;
+  bell.vibeT += dt;
+
+  // Rings
+  for(let i=rings.length-1;i>=0;i--){
+    const r=rings[i];
+    r.r += r.vr * dt/1000;
+    r.life -= r.decay * dt/16;
+    if(r.life<=0) rings.splice(i,1);
+  }
+  // Particles
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i];
+    p.x += p.vx * dt/16;
+    p.y += p.vy * dt/16;
+    p.vy += 0.06 * dt/16;
+    p.vx *= 0.99;
+    p.life -= p.decay * dt/16;
+    if(p.life<=0) particles.splice(i,1);
+  }
+}
+
+function onBellHit(impact){
+  // Judge against beat phase
+  // beatPhase: 1.0 is the perfect moment. Window: 0.88..1.12 perfect, 0.75..1.25 good
+  const phase=beatPhase;
+  let judge='miss', color='#7a5a3a', addScore=0;
+  let diff=Math.abs(phase-1);
+  if(diff<0.07){judge='妙';color='#ffe7a8';addScore=120;G.perfectCount++;G.combo++;}
+  else if(diff<0.18){judge='善';color='#e6b96a';addScore=70;G.combo++;}
+  else if(diff<0.30){judge='並';color='#a07a3c';addScore=25;G.combo=0;}
+  else {judge='早…';color='#6a4a2a';addScore=5;G.combo=0;}
+  if(phase>1.18) judge='遅…';
+  if(phase<0.7) judge='早…';
+
+  // Scale score by impact strength (0.4 weak ~ 1.5 strong)
+  const strengthMul = Math.max(0.4, Math.min(1.6, impact*0.9));
+  addScore = Math.round(addScore * strengthMul);
+  if(G.combo>1) addScore += G.combo*5;
+
+  G.score += addScore;
+  G.hitCount++;
+  G.beatIdx++;
+  G.maxCombo=Math.max(G.maxCombo,G.combo);
+
+  // visuals
+  bell.vibe = Math.min(20, bell.vibe + 4 + impact*6);
+  emitRing(impact*3 + (judge==='妙'?2:0));
+  // sparks at hit point
+  const hitX=bell.cx+bell.w*0.5;
+  const hitY=bell.cy;
+  spark(hitX,hitY,18+Math.round(impact*8), judge==='妙'?'#ffe7a8':'#e0b070',2,3+impact*2);
+
+  showJudge(judge,color);
+  curEl.textContent=G.beatIdx;
+  scoreEl.textContent=G.score;
+
+  // vibration
+  if(navigator.vibrate){
+    if(judge==='妙') navigator.vibrate([12,30,40]);
+    else navigator.vibrate(25);
+  }
+
+  // reset beat phase for next bell
+  beatPhase=0;
+  pendingJudge=false;
+
+  if(G.beatIdx>=G.totalBeats){
+    beatActive=false;
+    setTimeout(endGame, 1600);
+  }
+}
+
+function onBeatMiss(){
+  // beat passed without a hit
+  G.combo=0;
+  showJudge('見送り','#6a5a3a');
+  // don't count as a strike; the bell beat passes silently
+  // But also push idx so the game terminates
+  G.beatIdx++;
+  curEl.textContent=G.beatIdx;
+  if(G.beatIdx>=G.totalBeats){
+    beatActive=false;
+    setTimeout(endGame, 1400);
+  }
+}
+
+// === Render ===
+function drawBackground(t){
+  // soft incense smoke / lantern glow
+  const grad=ctx.createRadialGradient(W*0.5,H*0.35,10,W*0.5,H*0.35,Math.max(W,H)*0.8);
+  grad.addColorStop(0,'#1a1213');
+  grad.addColorStop(0.5,'#0a0608');
+  grad.addColorStop(1,'#050304');
+  ctx.fillStyle=grad;
+  ctx.fillRect(0,0,W,H);
+
+  // Subtle floor line
+  ctx.strokeStyle='rgba(120,90,50,0.12)';
+  ctx.lineWidth=1;
+  ctx.beginPath();
+  ctx.moveTo(0,H*0.78);
+  ctx.lineTo(W,H*0.78);
+  ctx.stroke();
+}
+
+function drawRings(){
+  for(const r of rings){
+    ctx.save();
+    ctx.strokeStyle=`rgba(220,170,90,${r.life*0.5})`;
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.ellipse(bell.cx,bell.cy,r.r, r.r*0.5,0,0,Math.PI*2);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function drawBeatGuide(){
+  // golden converging ring around bell -- when it overlaps the bell perfectly, hit!
+  // beatPhase 0 = far large outline, 1 = perfectly fits bell
+  if(!beatActive) return;
+  const p=beatPhase;
+  const targetR=bell.w*0.55;
+  const startR=bell.w*1.6;
+  const r=startR + (targetR-startR)*p;
+  let alpha=0.55;
+  if(p>1.0) alpha*=Math.max(0,1-(p-1)*3);
+  // color shifts as it approaches
+  const near=Math.max(0,1-Math.abs(p-1)*4);
+  const cR=180+Math.round(75*near);
+  const cG=140+Math.round(80*near);
+  const cB=70+Math.round(40*near);
+  ctx.save();
+  ctx.strokeStyle=`rgba(${cR},${cG},${cB},${alpha})`;
+  ctx.lineWidth=2+near*4;
+  ctx.shadowColor=`rgba(${cR},${cG},${cB},${alpha})`;
+  ctx.shadowBlur=10+near*20;
+  ctx.beginPath();
+  ctx.ellipse(bell.cx,bell.cy,r,r*0.9,0,0,Math.PI*2);
+  ctx.stroke();
+  // perfect band marker
+  ctx.shadowBlur=0;
+  ctx.strokeStyle=`rgba(255,225,160,0.35)`;
+  ctx.lineWidth=1;
+  ctx.beginPath();
+  ctx.ellipse(bell.cx,bell.cy,targetR,targetR*0.9,0,0,Math.PI*2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawBell(){
+  const wobX=bell.vibe*Math.sin(bell.vibeT*0.025);
+  const wobS=1+bell.vibe*0.003;
+  ctx.save();
+  ctx.translate(bell.cx+wobX,bell.cy);
+  ctx.scale(wobS,1/wobS);
+
+  const w=bell.w, h=bell.h;
+  // body gradient: bronze with patina
+  const g=ctx.createLinearGradient(-w*0.5,-h*0.5, w*0.5, h*0.5);
+  g.addColorStop(0,'#3a2a1a');
+  g.addColorStop(0.3,'#7a5a32');
+  g.addColorStop(0.55,'#a07a3c');
+  g.addColorStop(0.8,'#5a4220');
+  g.addColorStop(1,'#2a1a0e');
+  ctx.fillStyle=g;
+  // bell shape: curved trapezoid like Japanese temple bell
+  ctx.beginPath();
+  const topW=w*0.55, midW=w*0.78, botW=w;
+  const topY=-h*0.5;
+  const midY=-h*0.15;
+  const botY=h*0.45;
+  const lipY=h*0.5;
+  ctx.moveTo(-topW*0.5,topY);
+  ctx.quadraticCurveTo(-midW*0.5,midY,-botW*0.5,botY);
+  ctx.lineTo(-botW*0.5*1.04,lipY);
+  ctx.lineTo(botW*0.5*1.04,lipY);
+  ctx.lineTo(botW*0.5,botY);
+  ctx.quadraticCurveTo(midW*0.5,midY,topW*0.5,topY);
+  ctx.closePath();
+  ctx.fill();
+  // dome top
+  ctx.beginPath();
+  ctx.ellipse(0,topY,topW*0.5,topW*0.15,0,0,Math.PI*2);
+  ctx.fillStyle='#5a4220';
+  ctx.fill();
+
+  // top knob (ryuzu)
+  ctx.beginPath();
+  ctx.moveTo(-w*0.07, topY);
+  ctx.bezierCurveTo(-w*0.12,topY-w*0.12,-w*0.04,topY-w*0.18,0,topY-w*0.14);
+  ctx.bezierCurveTo(w*0.04,topY-w*0.18,w*0.12,topY-w*0.12,w*0.07,topY);
+  ctx.closePath();
+  ctx.fillStyle='#6a4a22';
+  ctx.fill();
+  ctx.strokeStyle='#2a1a0a';ctx.lineWidth=1;ctx.stroke();
+
+  // horizontal bands (obi)
+  ctx.strokeStyle='rgba(40,24,10,0.65)';
+  ctx.lineWidth=1.5;
+  for(const fy of [-0.05, 0.18]){
+    const y=h*fy;
+    // approximate width at this y
+    const t=(y-topY)/(botY-topY);
+    const ww = topW + (botW-topW)*t;
+    ctx.beginPath();
+    ctx.moveTo(-ww*0.5+2,y);
+    ctx.lineTo(ww*0.5-2,y);
+    ctx.stroke();
+  }
+  // vertical ribs
+  ctx.strokeStyle='rgba(40,24,10,0.4)';
+  for(const fx of [-0.32,0,0.32]){
+    ctx.beginPath();
+    const tx=fx*topW;
+    const bx=fx*botW;
+    ctx.moveTo(tx,topY+2);
+    ctx.quadraticCurveTo(fx*midW,midY,bx,botY-2);
+    ctx.stroke();
+  }
+  // lotus boss (tsuki-za) where shumoku strikes
+  ctx.save();
+  ctx.translate(w*0.5*0.95, 0);
+  ctx.scale(0.7,1);
+  const flowerR=w*0.07;
+  ctx.fillStyle='#c79a4a';
+  ctx.beginPath();ctx.arc(0,0,flowerR,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#5a3a16';
+  for(let i=0;i<8;i++){
+    const a=i*Math.PI/4;
+    ctx.beginPath();
+    ctx.ellipse(Math.cos(a)*flowerR*0.7,Math.sin(a)*flowerR*0.7,flowerR*0.35,flowerR*0.16,a,0,Math.PI*2);
+    ctx.fill();
+  }
+  ctx.fillStyle='#e7c478';
+  ctx.beginPath();ctx.arc(0,0,flowerR*0.35,0,Math.PI*2);ctx.fill();
+  ctx.restore();
+
+  // glow on hit
+  if(bell.vibe>0.5){
+    ctx.globalCompositeOperation='lighter';
+    const gw=ctx.createRadialGradient(w*0.45,0,4,w*0.45,0,bell.w*0.6);
+    gw.addColorStop(0,`rgba(255,210,130,${Math.min(0.7,bell.vibe*0.04)})`);
+    gw.addColorStop(1,'rgba(255,210,130,0)');
+    ctx.fillStyle=gw;
+    ctx.fillRect(-w,-h,w*2,h*2);
+    ctx.globalCompositeOperation='source-over';
+  }
+
+  ctx.restore();
+}
+
+function drawShumoku(){
+  const px=shu.pivotX, py=shu.pivotY;
+  const cx=px+shu.L*Math.sin(shu.angle);
+  const cy=py+shu.L*Math.cos(shu.angle);
+
+  // Anchor beam (rafter at top)
+  ctx.save();
+  ctx.fillStyle='#3a2818';
+  ctx.fillRect(W*0.55, py-12, W*0.5, 14);
+  ctx.fillStyle='#5a3a1c';
+  ctx.fillRect(W*0.55, py-14, W*0.5, 3);
+  // small bracket
+  ctx.fillStyle='#2a1c0c';
+  ctx.fillRect(px-6,py-2,12,8);
+  ctx.restore();
+
+  // Two ropes from pivot to pole ends (well, to pole around center)
+  const rope1X = cx - shu.poleLen*0.25;
+  const rope2X = cx + shu.poleLen*0.0;
+  const ropeY=cy;
+  ctx.strokeStyle='#3a2a18';
+  ctx.lineWidth=2;
+  ctx.beginPath();
+  ctx.moveTo(px-4,py+2);ctx.lineTo(rope1X,ropeY-shu.poleR);
+  ctx.moveTo(px+4,py+2);ctx.lineTo(rope2X,ropeY-shu.poleR);
+  ctx.stroke();
+
+  // Shumoku pole (horizontal cylinder)
+  const left=cx-shu.poleLen;
+  const right=cx;
+  const r=shu.poleR;
+  // pole body
+  const g=ctx.createLinearGradient(0,ropeY-r,0,ropeY+r);
+  g.addColorStop(0,'#6a4a26');
+  g.addColorStop(0.5,'#a07a3c');
+  g.addColorStop(1,'#3a2818');
+  ctx.fillStyle=g;
+  ctx.beginPath();
+  ctx.moveTo(left+r,ropeY-r);
+  ctx.lineTo(right-r,ropeY-r);
+  ctx.arc(right-r,ropeY,r,-Math.PI/2,Math.PI/2);
+  ctx.lineTo(left+r,ropeY+r);
+  ctx.arc(left+r,ropeY,r,Math.PI/2,-Math.PI/2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle='rgba(20,12,4,0.8)';
+  ctx.lineWidth=1;
+  ctx.stroke();
+
+  // Tip cap (the striking end - left)
+  ctx.save();
+  ctx.translate(left,ropeY);
+  ctx.fillStyle='#c79a4a';
+  ctx.beginPath();
+  ctx.arc(0,0,r*1.25,0,Math.PI*2);
+  ctx.fill();
+  ctx.strokeStyle='rgba(40,24,8,0.9)';
+  ctx.lineWidth=1.5;
+  ctx.stroke();
+  // ring decoration
+  ctx.strokeStyle='rgba(40,24,8,0.6)';
+  ctx.beginPath();
+  ctx.arc(r*0.6,0,r*0.5,0,Math.PI*2);
+  ctx.stroke();
+  ctx.restore();
+
+  // Right end - handle wrap
+  ctx.save();
+  ctx.translate(right,ropeY);
+  ctx.fillStyle='#5a3a18';
+  ctx.fillRect(-r*0.5,-r*1.3,r*2,r*2.6);
+  ctx.restore();
+}
+
+function drawParticles(){
+  ctx.save();
+  ctx.globalCompositeOperation='lighter';
+  for(const p of particles){
+    ctx.fillStyle=p.color;
+    ctx.globalAlpha=Math.max(0,p.life);
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
+    ctx.fill();
+  }
+  ctx.restore();
+  ctx.globalAlpha=1;
+}
+
+function drawAmbient(){
+  // floating motes
+  const t=performance.now()*0.0003;
+  ctx.fillStyle='rgba(220,180,110,0.05)';
+  for(let i=0;i<8;i++){
+    const x=(i*97+Math.sin(t+i)*40)%W;
+    const y=(i*131+t*60+Math.cos(t*1.3+i)*20)%H;
+    ctx.beginPath();
+    ctx.arc(x,y,1.5,0,Math.PI*2);
+    ctx.fill();
+  }
+}
+
+function render(){
+  drawBackground();
+  drawAmbient();
+  drawRings();
+  drawBell();
+  drawBeatGuide();
+  drawShumoku();
+  drawParticles();
+}
+
+function loop(now){
+  const dt=Math.min(50, now-lastT);
+  lastT=now;
+  if(G.state==='play') update(dt);
+  render();
+  if(G.state!=='intro') requestAnimationFrame(loop);
+  else requestAnimationFrame(loop);
+}
+
+// initial render in intro state too
+lastT=performance.now();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
