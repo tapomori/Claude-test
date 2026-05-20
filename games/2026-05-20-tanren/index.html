@@ -1,0 +1,658 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0a0608">
+<title>鍛錬 Tanren</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+  html,body{height:100%;background:#0a0608;color:#f4e7c8;font-family:"Hiragino Mincho ProN","Yu Mincho",serif;overflow:hidden;touch-action:manipulation}
+  #wrap{position:fixed;inset:0;display:flex;flex-direction:column}
+  #stage{position:relative;flex:1;overflow:hidden;background:
+    radial-gradient(120% 80% at 50% 110%,#3a1206 0%,#1a0805 30%,#08050a 60%,#000 100%);
+    touch-action:none}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  #hud{position:absolute;top:0;left:0;right:0;padding:env(safe-area-inset-top,12px) 14px 6px;display:flex;justify-content:space-between;align-items:flex-start;font-size:13px;letter-spacing:.15em;pointer-events:none}
+  #hud .col{display:flex;flex-direction:column;gap:4px}
+  #hud .lbl{opacity:.5;font-size:10px}
+  #hud .val{font-size:16px;color:#ffd58a;text-shadow:0 0 8px #b54a00}
+  #title{position:absolute;left:0;right:0;text-align:center;top:env(safe-area-inset-top,12px);font-size:11px;letter-spacing:.6em;opacity:.45}
+  #back{position:absolute;left:10px;bottom:env(safe-area-inset-bottom,10px);font-size:11px;letter-spacing:.2em;color:#f4e7c8;text-decoration:none;opacity:.4;padding:8px 10px;z-index:5}
+  #back:active{opacity:.8}
+  #overlay{position:absolute;inset:0;background:rgba(6,3,2,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;gap:18px;backdrop-filter:blur(3px);z-index:10;transition:opacity .3s}
+  #overlay.hide{opacity:0;pointer-events:none}
+  #overlay h1{font-size:32px;letter-spacing:.4em;color:#ffd58a;text-shadow:0 0 12px #b54a00,0 0 24px #b54a0066}
+  #overlay h2{font-size:13px;letter-spacing:.3em;opacity:.6;font-weight:normal}
+  #overlay p{font-size:13px;line-height:1.7;opacity:.7;max-width:280px}
+  #overlay button{margin-top:6px;background:linear-gradient(180deg,#d96612,#7a2c05);border:1px solid #ffd58a55;color:#fff8e7;font:inherit;font-size:15px;letter-spacing:.4em;padding:14px 30px;border-radius:2px;box-shadow:0 0 18px #b54a0099,inset 0 1px 0 #fff5;cursor:pointer}
+  #overlay button:active{transform:translateY(1px)}
+  #overlay small{font-size:10px;letter-spacing:.2em;opacity:.45}
+  .row{display:flex;align-items:center;gap:14px}
+  #lives{color:#ff8e4a;font-size:18px;letter-spacing:.1em}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div id="title">鍛 錬</div>
+    <div id="hud">
+      <div class="col">
+        <div class="lbl">SHAPE</div>
+        <div class="val" id="hud-shape">0%</div>
+      </div>
+      <div class="col" style="align-items:center">
+        <div class="lbl">LEVEL</div>
+        <div class="val" id="hud-level">1</div>
+      </div>
+      <div class="col" style="align-items:flex-end">
+        <div class="lbl">命</div>
+        <div id="lives">●●●</div>
+      </div>
+    </div>
+    <a id="back" href="../../index.html">← 戻</a>
+    <div id="overlay">
+      <h2>katana smithing</h2>
+      <h1>鍛 錬</h1>
+      <p>緑の帯に止まる瞬間、画面を打て。<br>赤く冷めたら炉(左)へ送って熱を戻す。<br>白熱しすぎれば刀は焦げる。</p>
+      <button id="start">打 つ</button>
+      <small>tap・hold・swipe</small>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  const stage = document.getElementById('stage');
+  const overlay = document.getElementById('overlay');
+  const startBtn = document.getElementById('start');
+  const hudShape = document.getElementById('hud-shape');
+  const hudLevel = document.getElementById('hud-level');
+  const livesEl = document.getElementById('lives');
+
+  let W = 0, H = 0, DPR = 1;
+  function resize(){
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    const r = stage.getBoundingClientRect();
+    W = r.width; H = r.height;
+    cv.width = Math.floor(W * DPR);
+    cv.height = Math.floor(H * DPR);
+    cv.style.width = W + 'px';
+    cv.style.height = H + 'px';
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', resize);
+  resize();
+
+  // ---- game state ----
+  const S = {
+    running:false, level:1, shape:0, lives:3,
+    heat:0.75,                       // 0..1 (0=cold black, .5=red, .75=orange, 1=white)
+    inForge:false,                   // true while finger drags blade onto forge
+    burnTimer:0,                     // accumulates while overheated
+    bar:{ x:0, dir:1, speed:0.7, sweet:0.16, ok:0.36 }, // timing bar marker 0..1
+    sparks:[], embers:[], cracks:[],
+    shake:0, flashHammer:0, flashStrike:0, flashBurn:0,
+    bladeWobble:0, bladeRot:0,
+    msg:'', msgT:0,
+    forgeGlow:0,                     // pulses when forge active
+    t:0
+  };
+
+  // ember background particles
+  function spawnEmber(){
+    S.embers.push({
+      x: Math.random()*W,
+      y: H + Math.random()*30,
+      vx: (Math.random()-0.5)*0.3,
+      vy: -0.4 - Math.random()*0.8,
+      life: 1, r: 0.6 + Math.random()*1.6,
+      hue: 18 + Math.random()*28
+    });
+  }
+  for(let i=0;i<30;i++){ spawnEmber(); S.embers[i].y = Math.random()*H; }
+
+  function spark(x,y,n,baseV){
+    const v = baseV || 4;
+    for(let i=0;i<n;i++){
+      const a = Math.random()*Math.PI*2;
+      const s = v*(0.5+Math.random()*1.2);
+      S.sparks.push({
+        x,y, vx:Math.cos(a)*s, vy:Math.sin(a)*s - 1.5,
+        life:1, decay: 0.012 + Math.random()*0.02,
+        hue: 38 + Math.random()*14, r: 1 + Math.random()*1.5
+      });
+    }
+  }
+
+  function showMsg(t,c='#ffd58a'){
+    S.msg = t; S.msgT = 60; S.msgColor = c;
+  }
+
+  function updateHud(){
+    hudShape.textContent = Math.floor(S.shape*100)+'%';
+    hudLevel.textContent = S.level;
+    livesEl.textContent = '●'.repeat(S.lives) + '○'.repeat(3-S.lives);
+  }
+
+  function loseLife(reason){
+    S.lives--;
+    S.shake = 14;
+    S.flashStrike = 1;
+    if(reason==='burn'){ S.flashBurn = 1; showMsg('焦げた', '#ff5a3c'); S.heat = 0.55; }
+    else if(reason==='cold'){ showMsg('砕けた', '#7aa0ff'); S.heat = 0.55; S.shape = Math.max(0, S.shape-0.04); }
+    else { showMsg('打ち損じ', '#ff8a55'); }
+    updateHud();
+    if(navigator.vibrate) navigator.vibrate(80);
+    if(S.lives<=0) endGame(false);
+  }
+
+  function endGame(win){
+    S.running = false;
+    overlay.classList.remove('hide');
+    document.querySelector('#overlay h1').textContent = win ? '見 事' : '折 損';
+    document.querySelector('#overlay h2').textContent = win ? '一振完成' : '鍛えなおせ';
+    document.querySelector('#overlay p').innerHTML =
+      `達した位: <b style="color:#ffd58a">${S.level}</b> 振<br>` +
+      `形成度: <b style="color:#ffd58a">${Math.floor(S.shape*100)}%</b>`;
+    startBtn.textContent = '再 び 打 つ';
+  }
+
+  function nextLevel(){
+    S.level++;
+    S.shape = 0;
+    S.bar.speed = Math.min(1.6, 0.7 + (S.level-1)*0.12);
+    S.bar.sweet = Math.max(0.07, 0.16 - (S.level-1)*0.012);
+    S.bar.ok = Math.max(0.18, 0.36 - (S.level-1)*0.02);
+    S.heat = 0.7;
+    showMsg(`第 ${S.level} 振`, '#ffd58a');
+    updateHud();
+  }
+
+  function startGame(){
+    S.running = true;
+    S.level = 1; S.shape = 0; S.lives = 3;
+    S.heat = 0.7; S.bar.x = 0; S.bar.dir = 1;
+    S.bar.speed = 0.7; S.bar.sweet = 0.16; S.bar.ok = 0.36;
+    S.sparks.length = 0; S.cracks.length = 0;
+    overlay.classList.add('hide');
+    updateHud();
+  }
+
+  startBtn.addEventListener('click', startGame);
+
+  // ---- input ----
+  let pointer = null;     // {x,y,downT, moved, onBlade}
+  function pt(ev){
+    const t = ev.touches ? ev.touches[0] : ev;
+    const r = stage.getBoundingClientRect();
+    return { x: t.clientX - r.left, y: t.clientY - r.top };
+  }
+
+  function bladeBox(){
+    // blade rests on the anvil mid-screen; forge is the left zone
+    const cy = H * 0.58;
+    const cx = W * (S.inForge ? 0.22 : 0.55);
+    return { cx, cy, len: Math.min(W*0.55, 260), th: 18 };
+  }
+
+  function inBlade(x,y){
+    const b = bladeBox();
+    return Math.abs(x - b.cx) < b.len*0.55 && Math.abs(y - b.cy) < b.th*2.2;
+  }
+
+  function forgeBox(){
+    return { x: W*0.08, y: H*0.5, r: Math.min(W*0.16, 84) };
+  }
+
+  function inForge(x,y){
+    const f = forgeBox();
+    return Math.hypot(x-f.x, y-f.y) < f.r*1.15;
+  }
+
+  function attemptStrike(){
+    // judge based on current bar position
+    const d = Math.abs(S.bar.x - 0.5) * 2; // 0 perfect, 1 worst
+    if(S.inForge){ showMsg('炉では打てぬ', '#ffb56a'); return; }
+    S.flashHammer = 1;
+    if(navigator.vibrate) navigator.vibrate(14);
+
+    // heat factor
+    const cold = S.heat < 0.4;
+    if(cold){
+      // strikes on cold blade cause cracks
+      loseLife('cold');
+      spark(bladeBox().cx, bladeBox().cy, 8, 3);
+      S.cracks.push({y: -0.5 + Math.random(), w: 0.4 + Math.random()*0.3, life:1});
+      return;
+    }
+
+    if(d < S.bar.sweet){
+      // perfect
+      const gain = 0.07 + Math.max(0, S.heat-0.6)*0.06;
+      S.shape = Math.min(1, S.shape + gain);
+      S.heat = Math.max(0.1, S.heat - 0.06);
+      spark(bladeBox().cx, bladeBox().cy, 22, 6);
+      showMsg('冴え', '#ffe7a8');
+      S.bladeWobble = 1;
+      if(navigator.vibrate) navigator.vibrate(28);
+      if(S.shape >= 0.999){
+        if(S.level >= 5){ endGame(true); }
+        else { nextLevel(); }
+      }
+    } else if(d < S.bar.ok){
+      // ok
+      S.shape = Math.min(1, S.shape + 0.035);
+      S.heat = Math.max(0.05, S.heat - 0.08);
+      spark(bladeBox().cx, bladeBox().cy, 10, 4);
+      showMsg('一打', '#ffd58a');
+    } else {
+      // miss
+      loseLife('miss');
+      spark(bladeBox().cx, bladeBox().cy, 14, 5);
+    }
+    updateHud();
+  }
+
+  function onDown(ev){
+    if(!S.running) return;
+    ev.preventDefault();
+    const p = pt(ev);
+    pointer = { x:p.x, y:p.y, downT: performance.now(), moved:false, onBlade:inBlade(p.x,p.y) };
+  }
+  function onMove(ev){
+    if(!S.running || !pointer) return;
+    ev.preventDefault();
+    const p = pt(ev);
+    const dx = p.x - pointer.x, dy = p.y - pointer.y;
+    if(Math.hypot(dx,dy) > 10) pointer.moved = true;
+    pointer.x = p.x; pointer.y = p.y;
+    // dragging blade between anvil and forge
+    if(pointer.onBlade){
+      if(inForge(p.x,p.y)) S.inForge = true;
+      else if(p.x > W*0.4) S.inForge = false;
+    }
+  }
+  function onUp(ev){
+    if(!S.running){ pointer=null; return; }
+    ev.preventDefault();
+    const p = pointer;
+    pointer = null;
+    if(!p) return;
+    // tap (not drag) → strike attempt
+    if(!p.moved){
+      attemptStrike();
+    }
+  }
+
+  stage.addEventListener('touchstart', onDown, {passive:false});
+  stage.addEventListener('touchmove', onMove, {passive:false});
+  stage.addEventListener('touchend', onUp, {passive:false});
+  stage.addEventListener('touchcancel', onUp, {passive:false});
+  stage.addEventListener('mousedown', onDown);
+  stage.addEventListener('mousemove', onMove);
+  stage.addEventListener('mouseup', onUp);
+
+  // ---- render & update ----
+  function heatColor(h){
+    // h 0..1
+    if(h < 0.2)  return `rgb(${40+h*200},${20},${20})`;
+    if(h < 0.45) return `rgb(${180+h*120},${30+h*80},${20})`;
+    if(h < 0.7)  return `rgb(255,${100+(h-0.4)*220},${30+(h-0.4)*100})`;
+    if(h < 0.9)  return `rgb(255,${230},${80+(h-0.7)*400})`;
+    return `rgb(255,255,${200+(h-0.9)*500})`;
+  }
+
+  function drawForge(){
+    const f = forgeBox();
+    // outer stone
+    const g = ctx.createRadialGradient(f.x, f.y, 4, f.x, f.y, f.r*1.7);
+    g.addColorStop(0, '#4a1a06');
+    g.addColorStop(0.5, '#1a0a04');
+    g.addColorStop(1, '#0a0504');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(f.x, f.y, f.r*1.7, 0, Math.PI*2); ctx.fill();
+    // mouth
+    const pulse = 0.7 + 0.3*Math.sin(S.t*0.08) + (S.inForge ? 0.4 : 0);
+    const mg = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, f.r);
+    mg.addColorStop(0, `rgba(255,${220 - 60*Math.sin(S.t*0.13)},120,${0.95*pulse})`);
+    mg.addColorStop(0.4, `rgba(255,140,40,${0.7*pulse})`);
+    mg.addColorStop(1, 'rgba(120,30,10,0)');
+    ctx.fillStyle = mg;
+    ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, Math.PI*2); ctx.fill();
+    // bricks ring (decoration)
+    ctx.strokeStyle = '#2a1408'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(f.x,f.y,f.r*0.95,0,Math.PI*2); ctx.stroke();
+
+    // label
+    ctx.fillStyle = 'rgba(255,200,140,0.45)';
+    ctx.font = '600 10px serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('炉', f.x, f.y + f.r*1.55);
+  }
+
+  function drawAnvil(){
+    const ax = W*0.55, ay = H*0.66;
+    const aw = Math.min(W*0.66, 310), ah = 60;
+    ctx.save();
+    ctx.translate(ax, ay);
+    // body
+    ctx.fillStyle = '#1a1410';
+    ctx.beginPath();
+    ctx.moveTo(-aw*0.5,0);
+    ctx.lineTo(aw*0.5,0);
+    ctx.lineTo(aw*0.35,ah);
+    ctx.lineTo(-aw*0.35,ah);
+    ctx.closePath();
+    ctx.fill();
+    // top edge highlight
+    ctx.fillStyle = '#2a221a';
+    ctx.fillRect(-aw*0.5, -4, aw, 5);
+    ctx.fillStyle = '#403428';
+    ctx.fillRect(-aw*0.5, -5, aw, 2);
+    // shadow underneath
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.beginPath();
+    ctx.ellipse(0, ah+4, aw*0.45, 6, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawBlade(){
+    const b = bladeBox();
+    const wobble = Math.sin(S.t*0.5) * S.bladeWobble * 4;
+    S.bladeWobble *= 0.9;
+    ctx.save();
+    ctx.translate(b.cx, b.cy + wobble);
+    ctx.rotate(S.bladeRot);
+
+    const len = b.len, th = b.th;
+    const heat = S.heat;
+    // glow halo
+    const halo = ctx.createRadialGradient(0,0,2,0,0,len*0.6);
+    halo.addColorStop(0, `rgba(255,${120+heat*120},${heat*200},${0.55*heat})`);
+    halo.addColorStop(1, 'rgba(255,80,20,0)');
+    ctx.fillStyle = halo;
+    ctx.beginPath(); ctx.ellipse(0,0,len*0.6, th*3, 0, 0, Math.PI*2); ctx.fill();
+
+    // blade body (hot tinted)
+    ctx.fillStyle = heatColor(heat);
+    ctx.beginPath();
+    ctx.moveTo(-len*0.5, -th*0.35);
+    ctx.lineTo(len*0.4, -th*0.5);
+    ctx.lineTo(len*0.5, 0);
+    ctx.lineTo(len*0.4, th*0.5);
+    ctx.lineTo(-len*0.5, th*0.35);
+    ctx.closePath();
+    ctx.fill();
+
+    // hamon line (subtle, only visible when not too hot)
+    if(heat < 0.85){
+      ctx.strokeStyle = `rgba(255,240,200,${0.25*(1-heat*0.6)})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for(let i=0;i<=20;i++){
+        const x = -len*0.45 + (len*0.85)*(i/20);
+        const y = th*0.05 + Math.sin(i*0.9)*1.4;
+        if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      }
+      ctx.stroke();
+    }
+
+    // tang (handle base)
+    ctx.fillStyle = '#231510';
+    ctx.fillRect(-len*0.5 - 14, -th*0.28, 14, th*0.56);
+
+    // cracks
+    ctx.strokeStyle = `rgba(20,5,5,${0.65})`;
+    ctx.lineWidth = 1.5;
+    for(const c of S.cracks){
+      ctx.beginPath();
+      const sx = -len*0.4 + c.w*len*0.8;
+      ctx.moveTo(sx, -th*0.3);
+      ctx.lineTo(sx + 6, 0);
+      ctx.lineTo(sx - 4, th*0.3);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawHammer(){
+    const b = bladeBox();
+    const fall = S.flashHammer;
+    if(fall <= 0.01) return;
+    S.flashHammer *= 0.86;
+    const y = b.cy - 90 - 80*(1-fall);
+    ctx.save();
+    ctx.translate(b.cx, y);
+    // handle
+    ctx.fillStyle = '#3a2a1c';
+    ctx.fillRect(-3, 0, 6, 70);
+    // head
+    ctx.fillStyle = '#7a7268';
+    ctx.fillRect(-22, -16, 44, 22);
+    ctx.fillStyle = '#a89e90';
+    ctx.fillRect(-22, -16, 44, 4);
+    ctx.restore();
+  }
+
+  function drawBar(){
+    // timing bar at bottom
+    const bw = Math.min(W*0.78, 360);
+    const bh = 18;
+    const bx = (W - bw)/2;
+    const by = H - 80 - Math.max(0, (window.innerHeight - H));
+    // background
+    ctx.fillStyle = 'rgba(20,10,5,0.85)';
+    ctx.fillRect(bx-2, by-2, bw+4, bh+4);
+    // zones
+    const ok = S.bar.ok, sweet = S.bar.sweet;
+    // ok yellow
+    ctx.fillStyle = '#3a2a10';
+    ctx.fillRect(bx + bw*(0.5-ok/2), by, bw*ok, bh);
+    // sweet green
+    ctx.fillStyle = '#1a4a26';
+    ctx.fillRect(bx + bw*(0.5-sweet/2), by, bw*sweet, bh);
+    // center line
+    ctx.strokeStyle = '#5aee8c';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(bx+bw*0.5, by); ctx.lineTo(bx+bw*0.5, by+bh); ctx.stroke();
+    // marker
+    const mx = bx + bw * S.bar.x;
+    ctx.fillStyle = '#ffe7a8';
+    ctx.shadowBlur = 14; ctx.shadowColor = '#ffb04a';
+    ctx.fillRect(mx-3, by-4, 6, bh+8);
+    ctx.shadowBlur = 0;
+
+    // label
+    ctx.fillStyle = 'rgba(255,200,140,0.5)';
+    ctx.font = '10px serif'; ctx.textAlign='center';
+    ctx.fillText('TIMING', W/2, by - 8);
+  }
+
+  function drawHeatBar(){
+    // vertical heat indicator on right
+    const x = W - 26;
+    const y0 = H*0.28, y1 = H*0.62;
+    ctx.fillStyle = 'rgba(20,10,5,0.7)';
+    ctx.fillRect(x-2, y0-2, 14, (y1-y0)+4);
+    // gradient fill from cold→hot
+    const g = ctx.createLinearGradient(0, y1, 0, y0);
+    g.addColorStop(0, '#2a0a0a');
+    g.addColorStop(0.35, '#b03010');
+    g.addColorStop(0.6, '#ffa040');
+    g.addColorStop(0.85, '#ffe070');
+    g.addColorStop(1, '#fff8d0');
+    ctx.fillStyle = g;
+    const fillH = (y1-y0) * S.heat;
+    ctx.fillRect(x, y1 - fillH, 10, fillH);
+    // optimal zone marker
+    const opt0 = y1 - (y1-y0)*0.85;
+    const opt1 = y1 - (y1-y0)*0.55;
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x-4, opt0); ctx.lineTo(x+14, opt0); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x-4, opt1); ctx.lineTo(x+14, opt1); ctx.stroke();
+    // burn warning
+    if(S.heat > 0.9){
+      ctx.fillStyle = `rgba(255,80,40,${0.4 + 0.4*Math.sin(S.t*0.3)})`;
+      ctx.fillRect(x-2, y0-2, 14, 8);
+    }
+    ctx.fillStyle = 'rgba(255,200,140,0.5)';
+    ctx.font = '9px serif'; ctx.textAlign='center';
+    ctx.fillText('熱', x+5, y1+14);
+  }
+
+  function drawShape(){
+    // small progress arc near top center (under title)
+    const cx = W/2, cy = 70;
+    const r = 22;
+    ctx.strokeStyle = 'rgba(255,200,140,0.18)';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
+    ctx.strokeStyle = '#ffd58a';
+    ctx.shadowBlur = 10; ctx.shadowColor = '#ffb04a';
+    ctx.beginPath();
+    ctx.arc(cx,cy,r,-Math.PI/2, -Math.PI/2 + Math.PI*2*S.shape);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+
+  function drawMsg(){
+    if(S.msgT <= 0) return;
+    S.msgT--;
+    const a = Math.min(1, S.msgT/30);
+    ctx.fillStyle = S.msgColor || '#ffd58a';
+    ctx.globalAlpha = a;
+    ctx.font = '700 26px serif';
+    ctx.textAlign = 'center';
+    ctx.shadowBlur = 12; ctx.shadowColor = '#000';
+    ctx.fillText(S.msg, W/2, H*0.42);
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+  }
+
+  function update(dt){
+    S.t += dt;
+
+    // timing bar oscillates
+    S.bar.x += S.bar.dir * S.bar.speed * dt * 0.014;
+    if(S.bar.x > 1){ S.bar.x = 1; S.bar.dir = -1; }
+    if(S.bar.x < 0){ S.bar.x = 0; S.bar.dir = 1; }
+
+    // heat behavior
+    if(S.inForge){
+      S.heat = Math.min(1.05, S.heat + 0.006*dt);
+      S.forgeGlow = Math.min(1, S.forgeGlow + 0.04*dt);
+      if(S.heat > 0.97){
+        S.burnTimer += dt;
+        if(S.burnTimer > 36){
+          S.burnTimer = 0;
+          loseLife('burn');
+          S.inForge = false;
+        }
+      } else S.burnTimer = Math.max(0, S.burnTimer - dt*0.5);
+    } else {
+      // cools faster the hotter it is
+      const rate = 0.0008 + S.heat*0.0015;
+      S.heat = Math.max(0, S.heat - rate*dt);
+      S.forgeGlow = Math.max(0, S.forgeGlow - 0.02*dt);
+      S.burnTimer = 0;
+    }
+
+    // sparks
+    for(let i=S.sparks.length-1;i>=0;i--){
+      const s = S.sparks[i];
+      s.x += s.vx * dt; s.y += s.vy * dt;
+      s.vy += 0.18 * dt;
+      s.vx *= 0.99; s.life -= s.decay * dt;
+      if(s.life <= 0) S.sparks.splice(i,1);
+    }
+    // embers
+    for(let i=S.embers.length-1;i>=0;i--){
+      const e = S.embers[i];
+      e.x += e.vx * dt; e.y += e.vy * dt;
+      e.life -= 0.004*dt;
+      if(e.y < -10 || e.life <= 0) S.embers.splice(i,1);
+    }
+    while(S.embers.length < 50) spawnEmber();
+
+    // shake decay
+    if(S.shake > 0) S.shake = Math.max(0, S.shake - 0.6*dt);
+    if(S.flashBurn > 0) S.flashBurn = Math.max(0, S.flashBurn - 0.03*dt);
+  }
+
+  function render(){
+    ctx.clearRect(0,0,W,H);
+
+    // background vignette already in CSS; add forge ambient when inForge
+    if(S.forgeGlow > 0.05){
+      const g = ctx.createRadialGradient(forgeBox().x, forgeBox().y, 10, forgeBox().x, forgeBox().y, Math.max(W,H));
+      g.addColorStop(0, `rgba(255,90,30,${0.18*S.forgeGlow})`);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0,0,W,H);
+    }
+
+    // embers
+    for(const e of S.embers){
+      ctx.fillStyle = `hsla(${e.hue},90%,${50+e.life*30}%,${0.35*e.life})`;
+      ctx.beginPath(); ctx.arc(e.x, e.y, e.r, 0, Math.PI*2); ctx.fill();
+    }
+
+    // shake transform for foreground
+    ctx.save();
+    if(S.shake > 0){
+      ctx.translate((Math.random()-0.5)*S.shake, (Math.random()-0.5)*S.shake);
+    }
+
+    drawForge();
+    drawAnvil();
+    drawBlade();
+    drawHammer();
+
+    // sparks (on top)
+    for(const s of S.sparks){
+      ctx.fillStyle = `hsla(${s.hue},90%,${50+s.life*30}%,${s.life})`;
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r*(0.6+s.life*0.6), 0, Math.PI*2); ctx.fill();
+    }
+
+    ctx.restore();
+
+    drawShape();
+    drawBar();
+    drawHeatBar();
+    drawMsg();
+
+    // burn flash
+    if(S.flashBurn > 0.02){
+      ctx.fillStyle = `rgba(255,60,30,${0.3*S.flashBurn})`;
+      ctx.fillRect(0,0,W,H);
+    }
+  }
+
+  let last = performance.now();
+  function loop(now){
+    const dt = Math.min(2.5, (now - last) / 16.66);
+    last = now;
+    if(S.running) update(dt);
+    else { // still animate embers in menu
+      for(const e of S.embers){
+        e.x += e.vx * dt; e.y += e.vy * dt; e.life -= 0.004*dt;
+        if(e.y < -10 || e.life <= 0){ S.embers.splice(S.embers.indexOf(e),1); }
+      }
+      while(S.embers.length < 50) spawnEmber();
+      S.t += dt;
+    }
+    render();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
