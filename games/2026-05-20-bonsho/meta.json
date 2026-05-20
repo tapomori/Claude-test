@@ -1,0 +1,8 @@
+{
+  "title": "Bonshō",
+  "date": "2026-05-20",
+  "description": "梵鐘の撞木を指で右に引き、静かに離す物理振り子＋打鐘タイミング。鐘の周りで縮む金輪が鐘にぴったり重なる瞬間に撞木を当てよ。引きの強さで響きが変わり、九つの一打を打ち重ねて余韻の総響きを競う。",
+  "tags": ["drag", "release", "pendulum", "timing", "physics"],
+  "rating": null,
+  "notes": ""
+}
