@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#070d18">
+<title>Mizukiri 水切り</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{width:100%;height:100%;overflow:hidden;background:#040711;color:#eaf2ff;
+    font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans','Noto Sans JP',sans-serif;
+    touch-action:none;user-select:none;-webkit-user-select:none;}
+  canvas{display:block;width:100%;height:100%;}
+  .back{position:fixed;top:env(safe-area-inset-top,12px);left:12px;padding:8px 14px;
+    background:rgba(0,10,30,0.45);color:#bfd9ff;border-radius:18px;text-decoration:none;
+    font-size:12px;z-index:10;backdrop-filter:blur(6px);border:1px solid rgba(180,210,255,0.18);}
+  .hud{position:fixed;top:env(safe-area-inset-top,12px);right:14px;z-index:10;text-align:right;
+    pointer-events:none;}
+  .hud .row{display:flex;gap:14px;justify-content:flex-end;align-items:baseline;}
+  .hud .cell .lbl{font-size:9px;letter-spacing:3px;opacity:.55;}
+  .hud .cell .val{font-size:22px;font-weight:200;color:#cfe6ff;line-height:1;}
+  .hud .stones{margin-top:8px;display:flex;gap:5px;justify-content:flex-end;}
+  .hud .stones .s{width:9px;height:5px;border-radius:3px;background:#b8c4d4;opacity:.9;
+    box-shadow:0 1px 2px rgba(0,0,0,.4);}
+  .hud .stones .s.used{opacity:.18;}
+  .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+    flex-direction:column;background:radial-gradient(circle at 50% 40%,rgba(20,30,60,.92),rgba(4,7,17,.96));
+    backdrop-filter:blur(10px);z-index:20;padding:30px;text-align:center;}
+  .overlay.hidden{display:none;}
+  .overlay h1{font-size:46px;font-weight:200;letter-spacing:14px;color:#dfecff;margin-bottom:4px;
+    text-shadow:0 0 24px rgba(140,180,255,.35);}
+  .overlay .sub{opacity:.55;font-size:11px;letter-spacing:6px;margin-bottom:30px;color:#cfe6ff;}
+  .overlay p{opacity:.82;font-size:13px;line-height:1.9;max-width:280px;margin-bottom:28px;
+    color:#dceaff;}
+  .overlay .big{font-size:88px;font-weight:100;letter-spacing:2px;color:#cfe6ff;line-height:1;
+    margin-bottom:4px;text-shadow:0 0 28px rgba(140,180,255,.4);}
+  .overlay .scoreLbl{opacity:.55;font-size:10px;letter-spacing:6px;margin-bottom:18px;}
+  .overlay .best{opacity:.7;font-size:12px;margin-bottom:24px;letter-spacing:2px;}
+  .overlay button{padding:14px 40px;background:transparent;color:#dfecff;
+    border:1px solid rgba(207,232,255,.42);border-radius:30px;font-size:13px;letter-spacing:6px;
+    cursor:pointer;font-family:inherit;}
+  .overlay button:active{background:rgba(207,232,255,.12);}
+  .msg{position:fixed;top:36%;left:50%;transform:translate(-50%,-50%);pointer-events:none;
+    font-size:28px;font-weight:200;letter-spacing:3px;color:#dfecff;z-index:9;opacity:0;
+    text-shadow:0 0 18px rgba(140,180,255,.5);}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<a class="back" href="../../index.html">← もどる</a>
+<div class="hud">
+  <div class="row">
+    <div class="cell"><div class="lbl">SKIPS</div><div class="val" id="skips">0</div></div>
+  </div>
+  <div class="stones" id="stoneBar"></div>
+</div>
+<div class="msg" id="msg"></div>
+<div class="overlay" id="overlay">
+  <h1>水切り</h1>
+  <div class="sub">MIZUKIRI</div>
+  <p>石を下に引いて狙い、指を離して水面へ。<br>浅い角度で投げるほど石はよく跳ねる。<br>五投で何度跳ねさせられるか。</p>
+  <button id="startBtn">はじめる</button>
+</div>
+<script>
+(() => {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  const skipsEl = document.getElementById('skips');
+  const stoneBar = document.getElementById('stoneBar');
+  const msgEl = document.getElementById('msg');
+  const overlay = document.getElementById('overlay');
+
+  let W=0,H=0,DPR=1;
+  const resize = () => {
+    DPR = Math.min(window.devicePixelRatio||1,2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    cv.width = W*DPR; cv.height = H*DPR;
+    cv.style.width = W+'px'; cv.style.height = H+'px';
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    if(!state.playing) buildScene();
+  };
+
+  const STONE_COUNT = 5;
+  const state = {
+    playing:false, stones:STONE_COUNT, totalSkips:0, bestThrow:0,
+    stone:null, aiming:false, aim:null,
+    waterY:0, horizon:0,
+    ripples:[], splashes:[], stars:[], floats:[],
+    mountain:[], breeze:0,
+    msg:'', msgT:0, msgDur:1,
+    flash:0,
+  };
+
+  const vib = (ms) => { if(navigator.vibrate) navigator.vibrate(ms); };
+  const rand = (a,b) => a + Math.random()*(b-a);
+
+  function buildScene(){
+    state.waterY = H * 0.56;
+    state.horizon = H * 0.40;
+    state.stars = [];
+    for(let i=0;i<60;i++){
+      state.stars.push({
+        x: Math.random()*W, y: Math.random()*state.horizon*0.95,
+        r: rand(0.3,1.4), a: rand(0.3,0.95), tw: Math.random()*Math.PI*2
+      });
+    }
+    state.mountain = [];
+    let mx=0;
+    while(mx<W+8){
+      state.mountain.push({
+        x: mx,
+        y: state.horizon - 6 - Math.sin(mx*0.011)*7 - Math.sin(mx*0.037+1.3)*3.5
+      });
+      mx += 5;
+    }
+  }
+
+  function spawnStone(){
+    state.stone = {
+      x: W*0.16, y: state.waterY - 14,
+      vx: 0, vy: 0,
+      flying:false, sinking:false, dead:false,
+      skips:0, rot:0, rotV:0, alpha:1,
+      sparkleT:0,
+    };
+    state.aim = null; state.aiming = false;
+  }
+
+  function spawnFloats(){
+    state.floats = [];
+    const n = 2 + Math.floor(Math.random()*3);
+    const minX = W*0.35;
+    for(let i=0;i<n;i++){
+      const x = minX + (W*0.95 - minX) * ((i+Math.random()*0.7)/n);
+      state.floats.push({
+        x, y: state.waterY + rand(6,22),
+        bob: Math.random()*Math.PI*2, hit:false,
+        kind: Math.random()<0.55 ? 'lotus' : 'lantern',
+        glow: Math.random()*Math.PI*2,
+      });
+    }
+  }
+
+  function showMsg(text, dur=900){
+    state.msg = text; state.msgT = dur; state.msgDur = dur;
+    msgEl.textContent = text;
+  }
+
+  function updateHUD(){
+    skipsEl.textContent = state.totalSkips;
+    const bar = [];
+    for(let i=0;i<STONE_COUNT;i++){
+      const used = i >= state.stones;
+      bar.push(`<span class="s ${used?'used':''}"></span>`);
+    }
+    stoneBar.innerHTML = bar.join('');
+  }
+
+  // --- Input ---
+  const pos = (e) => {
+    const t = e.touches && e.touches[0] ? e.touches[0] : e;
+    const r = cv.getBoundingClientRect();
+    return { x: t.clientX - r.left, y: t.clientY - r.top };
+  };
+
+  function onDown(e){
+    e.preventDefault();
+    if(!state.playing || !state.stone || state.stone.flying || state.stone.dead) return;
+    const p = pos(e);
+    state.aiming = true;
+    state.aim = { sx:p.x, sy:p.y, x:p.x, y:p.y };
+  }
+  function onMove(e){
+    if(!state.aiming) return;
+    e.preventDefault();
+    const p = pos(e);
+    state.aim.x = p.x; state.aim.y = p.y;
+  }
+  function onUp(e){
+    if(!state.aiming) return;
+    e.preventDefault();
+    state.aiming = false;
+    const dx = state.aim.x - state.aim.sx;  // drag direction (user)
+    const dy = state.aim.y - state.aim.sy;
+    const dist = Math.hypot(dx,dy);
+    if(dist < 18){ state.aim = null; return; }
+    // Throw OPPOSITE to drag (slingshot)
+    let vx = -dx * 0.16;
+    let vy = -dy * 0.16;
+    // Always cast forward (right). If user drags up-right, still allow.
+    if(vx < 0) vx = -vx * 0.4; // weak backward throw
+    // Speed cap and floor
+    let sp = Math.hypot(vx,vy);
+    const MAX = 22, MIN = 5;
+    if(sp > MAX){ vx *= MAX/sp; vy *= MAX/sp; sp = MAX; }
+    if(sp < MIN){ const k = MIN/sp; vx *= k; vy *= k; }
+    const st = state.stone;
+    st.vx = vx; st.vy = vy;
+    st.flying = true;
+    st.rotV = (Math.abs(vx)*0.04 + 0.05) * (Math.random()<0.5?-1:1);
+    state.aim = null;
+    vib(18);
+  }
+
+  cv.addEventListener('touchstart', onDown, {passive:false});
+  cv.addEventListener('touchmove', onMove, {passive:false});
+  cv.addEventListener('touchend', onUp, {passive:false});
+  cv.addEventListener('touchcancel', onUp, {passive:false});
+  cv.addEventListener('mousedown', onDown);
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  window.addEventListener('resize', resize);
+
+  // --- Update / physics ---
+  function addRipple(x,y,maxR=46,life=80){
+    state.ripples.push({x,y,r:5,vr:maxR/life,max:maxR,life,maxLife:life});
+  }
+  function addSplash(x,y,vx,vy,n=14){
+    for(let i=0;i<n;i++){
+      const a = -Math.PI/2 + rand(-Math.PI*0.35, Math.PI*0.35);
+      const sp = rand(1.4, 5.2);
+      state.splashes.push({
+        x, y, vx: Math.cos(a)*sp + vx*0.12, vy: Math.sin(a)*sp - rand(0.5,1.8),
+        life: rand(18,42), r: rand(0.8,2)
+      });
+    }
+  }
+
+  function endThrow(){
+    if(state.stone.skips > state.bestThrow) state.bestThrow = state.stone.skips;
+    state.stones--;
+    updateHUD();
+    if(state.stones <= 0){
+      setTimeout(endGame, 700);
+      state.stone = null;
+    } else {
+      setTimeout(()=>{ spawnFloats(); spawnStone(); }, 520);
+      state.stone = null;
+    }
+  }
+
+  function endGame(){
+    state.playing = false;
+    overlay.innerHTML = `
+      <div class="big">${state.totalSkips}</div>
+      <div class="scoreLbl">TOTAL SKIPS</div>
+      <div class="best">最長 ${state.bestThrow} 連跳</div>
+      <p>${commentFor(state.totalSkips)}</p>
+      <button id="startBtn">もういちど</button>
+    `;
+    overlay.classList.remove('hidden');
+    document.getElementById('startBtn').addEventListener('click', startGame);
+  }
+
+  function commentFor(s){
+    if(s>=25) return '湖面が歌う。<br>その手は石の声を聞いている。';
+    if(s>=15) return '宵の水面を、よく走らせた。';
+    if(s>=8)  return '指先が水を覚えはじめた。';
+    return 'もう一度、息を整えて。';
+  }
+
+  let last = 0;
+  function loop(t){
+    if(!last) last = t;
+    let dt = (t - last) / 16.67;
+    if(dt > 2.5) dt = 2.5;
+    last = t;
+    update(dt);
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  function update(dt){
+    state.breeze += dt * 0.012;
+    // floats
+    for(const f of state.floats){
+      f.bob += dt*0.05;
+      f.glow += dt*0.03;
+    }
+    // ripples
+    state.ripples = state.ripples.filter(r => {
+      r.r += r.vr * dt;
+      r.life -= dt;
+      return r.life > 0 && r.r < r.max*1.3;
+    });
+    // splashes
+    state.splashes = state.splashes.filter(s => {
+      s.x += s.vx * dt;
+      s.y += s.vy * dt;
+      s.vy += 0.35 * dt;
+      s.life -= dt;
+      return s.life > 0 && s.y < state.waterY + 14;
+    });
+    // stars twinkle
+    for(const s of state.stars) s.tw += dt*0.04;
+    // message
+    if(state.msgT > 0) state.msgT -= dt*16;
+    msgEl.style.opacity = Math.max(0, Math.min(1, state.msgT/600));
+    // flash
+    if(state.flash > 0) state.flash -= dt*0.06;
+
+    const st = state.stone;
+    if(!st) return;
+
+    if(st.flying && !st.sinking){
+      st.x += st.vx * dt;
+      st.y += st.vy * dt;
+      st.vy += 0.42 * dt;     // gravity
+      st.rot += st.rotV * dt;
+      st.sparkleT += dt;
+      // micro trail
+      if(st.sparkleT > 1.4 && st.y < state.waterY - 4){
+        st.sparkleT = 0;
+        state.splashes.push({
+          x: st.x, y: st.y, vx: -st.vx*0.04, vy: -st.vy*0.04,
+          life: 16, r: 0.9
+        });
+      }
+
+      if(st.y >= state.waterY){
+        const speed = Math.hypot(st.vx, st.vy);
+        // shallow if vertical speed is small compared to horizontal
+        const shallow = (st.vy < speed*0.55) && (st.vx > 2.2);
+        const minBounceSpeed = 3.4;
+        const canSkip = shallow && speed > minBounceSpeed;
+
+        addSplash(st.x, state.waterY, st.vx, st.vy, canSkip ? 10 : 22);
+        addRipple(st.x, state.waterY, canSkip ? 38 : 64, canSkip ? 70 : 110);
+        if(canSkip) addRipple(st.x, state.waterY, 18, 40);
+
+        // hit floats near landing
+        for(const f of state.floats){
+          if(!f.hit && Math.abs(f.x - st.x) < 24){
+            f.hit = true;
+            state.totalSkips += 2;
+            addRipple(f.x, state.waterY, 50, 80);
+            for(let i=0;i<14;i++){
+              state.splashes.push({
+                x:f.x, y:state.waterY,
+                vx: Math.cos(i/14*Math.PI*2)*rand(1,3),
+                vy: -rand(0.8,2.4),
+                life: 28, r: 1.3
+              });
+            }
+            showMsg('+2 灯', 700);
+            state.flash = 0.6;
+            vib(22);
+            updateHUD();
+          }
+        }
+
+        if(canSkip){
+          st.skips++;
+          state.totalSkips++;
+          updateHUD();
+          // damping
+          st.vx *= 0.84;
+          // bounce
+          st.vy = -Math.abs(st.vy)*0.45 - 1.8;
+          st.y = state.waterY - 2;
+          vib(10);
+          if(st.skips === 3) showMsg('three', 650);
+          else if(st.skips === 5) showMsg('five!', 700);
+          else if(st.skips === 7) showMsg('seven!!', 800);
+          else if(st.skips >= 9) showMsg(`${st.skips}!`, 800);
+        } else {
+          st.sinking = true;
+          showMsg(st.skips>0 ? `${st.skips} skip` : '…', 900);
+          vib(45);
+        }
+      }
+
+      // off screen forward
+      if(st.x > W + 40 || st.x < -40){
+        endThrow();
+      }
+    } else if(st.sinking){
+      st.y += 0.8 * dt;
+      st.alpha -= 0.04 * dt;
+      st.rot += st.rotV * dt * 0.4;
+      if(st.alpha <= 0){
+        st.dead = true;
+        endThrow();
+      }
+    }
+  }
+
+  // --- Render ---
+  function render(){
+    // sky
+    const sky = ctx.createLinearGradient(0,0,0,state.horizon);
+    sky.addColorStop(0, '#070a1e');
+    sky.addColorStop(0.55, '#162046');
+    sky.addColorStop(1, '#3a2f5a');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0,0,W,state.horizon);
+
+    // stars
+    for(const s of state.stars){
+      const a = s.a * (0.55 + 0.45*Math.sin(s.tw));
+      ctx.fillStyle = `rgba(240,245,255,${a})`;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    // moon
+    const mx = W*0.78, my = state.horizon*0.36;
+    const moonG = ctx.createRadialGradient(mx,my,18, mx,my,80);
+    moonG.addColorStop(0,'rgba(255,238,200,0.45)');
+    moonG.addColorStop(1,'rgba(255,238,200,0)');
+    ctx.fillStyle = moonG;
+    ctx.beginPath(); ctx.arc(mx,my,80,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#fff4d4';
+    ctx.beginPath(); ctx.arc(mx,my,20,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.06)';
+    ctx.beginPath(); ctx.arc(mx-4,my-3,3,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(mx+5,my+2,2.2,0,Math.PI*2); ctx.fill();
+
+    // distant mountain silhouette
+    ctx.fillStyle = '#070a1c';
+    ctx.beginPath();
+    ctx.moveTo(0, state.horizon+1);
+    for(const p of state.mountain) ctx.lineTo(p.x, p.y);
+    ctx.lineTo(W, state.horizon+1);
+    ctx.closePath();
+    ctx.fill();
+
+    // closer shore silhouette + faint reeds
+    ctx.fillStyle = '#040712';
+    ctx.fillRect(0, state.waterY-2, W, 3);
+
+    // water gradient
+    const wg = ctx.createLinearGradient(0,state.waterY,0,H);
+    wg.addColorStop(0, '#0e1b32');
+    wg.addColorStop(0.4, '#0a1428');
+    wg.addColorStop(1, '#03060f');
+    ctx.fillStyle = wg;
+    ctx.fillRect(0, state.waterY, W, H-state.waterY);
+
+    // moon reflection on water (broken trail)
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for(let i=0;i<14;i++){
+      const ry = state.waterY + 6 + i*6;
+      const wob = Math.sin(state.breeze*4 + i*0.7)*8;
+      const w = (40 - i*1.4) + wob*0.4;
+      const a = (1 - i/14) * 0.18;
+      ctx.fillStyle = `rgba(255,238,200,${a})`;
+      ctx.fillRect(mx - w/2, ry, w, 2);
+    }
+    ctx.restore();
+
+    // ambient horizontal water lines
+    ctx.strokeStyle = 'rgba(140,180,230,0.06)';
+    ctx.lineWidth = 1;
+    for(let i=0;i<6;i++){
+      const y = state.waterY + 18 + i*22;
+      ctx.beginPath();
+      ctx.moveTo(0, y + Math.sin(state.breeze + i)*2);
+      ctx.lineTo(W, y + Math.sin(state.breeze + i + 1.2)*2);
+      ctx.stroke();
+    }
+
+    // ripples
+    for(const r of state.ripples){
+      const a = (r.life / r.maxLife) * 0.55;
+      ctx.strokeStyle = `rgba(180,220,255,${a})`;
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.ellipse(r.x, r.y+1, r.r, r.r*0.32, 0, 0, Math.PI*2);
+      ctx.stroke();
+      ctx.strokeStyle = `rgba(220,235,255,${a*0.55})`;
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.ellipse(r.x, r.y+1, r.r*0.65, r.r*0.22, 0, 0, Math.PI*2);
+      ctx.stroke();
+    }
+
+    // floats (lotus / lanterns)
+    for(const f of state.floats){
+      if(f.hit) continue;
+      const by = f.y + Math.sin(f.bob)*1.5;
+      if(f.kind === 'lotus'){
+        // glow
+        const lg = ctx.createRadialGradient(f.x,by,2, f.x,by,18);
+        lg.addColorStop(0,'rgba(255,200,220,0.4)');
+        lg.addColorStop(1,'rgba(255,200,220,0)');
+        ctx.fillStyle = lg;
+        ctx.beginPath(); ctx.arc(f.x,by,18,0,Math.PI*2); ctx.fill();
+        // petals
+        ctx.fillStyle = 'rgba(255,200,215,0.92)';
+        for(let i=0;i<5;i++){
+          const a = (i/5)*Math.PI*2 + f.glow*0.2;
+          const px = f.x + Math.cos(a)*4.5;
+          const py = by + Math.sin(a)*1.8;
+          ctx.save();
+          ctx.translate(px,py);
+          ctx.rotate(a);
+          ctx.beginPath();
+          ctx.ellipse(0,0,5.5,2.6,0,0,Math.PI*2);
+          ctx.fill();
+          ctx.restore();
+        }
+        ctx.fillStyle = '#ffe18a';
+        ctx.beginPath(); ctx.arc(f.x,by,2.4,0,Math.PI*2); ctx.fill();
+      } else {
+        // lantern
+        const lg = ctx.createRadialGradient(f.x,by,3, f.x,by,22);
+        lg.addColorStop(0,'rgba(255,170,80,0.55)');
+        lg.addColorStop(1,'rgba(255,170,80,0)');
+        ctx.fillStyle = lg;
+        ctx.beginPath(); ctx.arc(f.x,by,22,0,Math.PI*2); ctx.fill();
+        // body
+        ctx.fillStyle = '#caa07a';
+        ctx.fillRect(f.x-7, by-7, 14, 2);
+        ctx.fillRect(f.x-7, by+5, 14, 2);
+        const pulse = 0.85 + 0.15*Math.sin(f.glow*3);
+        ctx.fillStyle = `rgba(255,196,120,${pulse})`;
+        ctx.fillRect(f.x-6, by-5, 12, 10);
+        ctx.fillStyle = `rgba(255,230,170,${pulse})`;
+        ctx.fillRect(f.x-4, by-3, 8, 6);
+      }
+    }
+
+    // splashes
+    for(const s of state.splashes){
+      const a = Math.max(0, s.life/30) * 0.9;
+      ctx.fillStyle = `rgba(210,230,255,${a})`;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    // stone
+    const st = state.stone;
+    if(st){
+      ctx.save();
+      ctx.translate(st.x, st.y);
+      ctx.rotate(st.rot);
+      ctx.globalAlpha = st.alpha;
+      // shadow under stone when above water
+      if(st.y < state.waterY - 4 && !st.sinking){
+        ctx.save();
+        const sy = state.waterY - st.y;
+        const scale = Math.max(0.2, 1 - sy/200);
+        ctx.globalAlpha = 0.25 * scale * st.alpha;
+        ctx.setTransform(DPR,0,0,DPR,(st.x)*DPR, state.waterY*DPR);
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        ctx.ellipse(0,0, 10*scale, 3*scale, 0, 0, Math.PI*2);
+        ctx.fill();
+        ctx.restore();
+        ctx.translate(st.x, st.y);
+        ctx.rotate(st.rot);
+        ctx.globalAlpha = st.alpha;
+      }
+      // body
+      ctx.fillStyle = '#9aa6b8';
+      ctx.beginPath();
+      ctx.ellipse(0,0,9,4,0,0,Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      ctx.beginPath();
+      ctx.ellipse(-2.5,-1.2,4.2,1.5,0,0,Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.beginPath();
+      ctx.ellipse(1.5,1.5,4,1.2,0,0,Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // aim guide
+    if(state.aiming && state.aim && st){
+      const dx = state.aim.x - state.aim.sx;
+      const dy = state.aim.y - state.aim.sy;
+      const dist = Math.hypot(dx,dy);
+
+      // pull-back line from stone
+      ctx.strokeStyle = 'rgba(200,225,255,0.55)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([2,5]);
+      ctx.beginPath();
+      ctx.moveTo(st.x, st.y);
+      ctx.lineTo(st.x + dx, st.y + dy);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // predict trajectory (mirror of drag)
+      let vx = -dx*0.16, vy = -dy*0.16;
+      if(vx < 0) vx = -vx*0.4;
+      let sp = Math.hypot(vx,vy);
+      const MAX = 22, MIN = 5;
+      if(sp > MAX){ vx *= MAX/sp; vy *= MAX/sp; }
+      if(sp < MIN && sp > 0){ const k=MIN/sp; vx*=k; vy*=k; }
+      let px = st.x, py = st.y, pvx = vx, pvy = vy;
+      ctx.fillStyle = 'rgba(207,232,255,0.55)';
+      for(let i=0;i<28;i++){
+        px += pvx*0.85; py += pvy*0.85; pvy += 0.42*0.85;
+        if(py >= state.waterY) break;
+        if(i%2===0){
+          ctx.beginPath();
+          ctx.arc(px,py, 1.6 - i*0.04, 0, Math.PI*2);
+          ctx.fill();
+        }
+      }
+
+      // power ring around stone
+      const pwr = Math.min(dist/110, 1.4);
+      ctx.strokeStyle = `rgba(207,232,255,${0.35 + pwr*0.45})`;
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.arc(st.x, st.y, 13 + pwr*10, 0, Math.PI*2);
+      ctx.stroke();
+    }
+
+    // flash on bonus
+    if(state.flash > 0){
+      ctx.fillStyle = `rgba(255,220,160,${state.flash*0.18})`;
+      ctx.fillRect(0,0,W,H);
+    }
+
+    // vignette
+    const vg = ctx.createRadialGradient(W/2,H/2,Math.min(W,H)*0.4, W/2,H/2,Math.max(W,H)*0.7);
+    vg.addColorStop(0,'rgba(0,0,0,0)');
+    vg.addColorStop(1,'rgba(0,0,0,0.55)');
+    ctx.fillStyle = vg;
+    ctx.fillRect(0,0,W,H);
+  }
+
+  function startGame(){
+    overlay.classList.add('hidden');
+    state.playing = true;
+    state.stones = STONE_COUNT;
+    state.totalSkips = 0;
+    state.bestThrow = 0;
+    state.ripples = [];
+    state.splashes = [];
+    updateHUD();
+    buildScene();
+    spawnFloats();
+    spawnStone();
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  resize();
+  buildScene();
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
