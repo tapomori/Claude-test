@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Tako-age 凧揚げ</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+    background: #0a0d1f;
+    font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Mincho ProN', 'Yu Mincho', serif;
+    color: #f3eede;
+  }
+  #wrap { position: fixed; inset: 0; touch-action: none; }
+  canvas { display: block; width: 100%; height: 100%; }
+  .hud {
+    position: absolute; top: 0; left: 0; right: 0;
+    padding: 14px 20px;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    pointer-events: none; z-index: 10;
+    text-shadow: 0 1px 6px rgba(0,0,0,0.85);
+  }
+  .col { display: flex; flex-direction: column; gap: 3px; }
+  .col.right { align-items: flex-end; }
+  .label { font-size: 9px; opacity: 0.55; letter-spacing: 0.35em; }
+  .value { font-size: 22px; font-weight: 500; letter-spacing: 0.08em; line-height: 1; }
+  .lives { font-size: 14px; letter-spacing: 0.25em; margin-top: 4px; color: #fcdf94; }
+  .overlay {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 24px; text-align: center;
+    background: rgba(8, 10, 25, 0.72);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    z-index: 20;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h1 {
+    font-size: 40px; font-weight: 400; letter-spacing: 0.5em;
+    margin-bottom: 20px; color: #fcdf94;
+    text-shadow: 0 0 28px rgba(252,223,148,0.55);
+  }
+  .sub {
+    font-size: 13px; opacity: 0.82;
+    margin-bottom: 30px; letter-spacing: 0.18em;
+    line-height: 1.95; max-width: 290px;
+  }
+  .big {
+    font-size: 72px; color: #fcdf94; font-weight: 500;
+    letter-spacing: 0.04em; line-height: 1;
+    text-shadow: 0 0 36px rgba(252,223,148,0.7);
+    margin: 18px 0 6px;
+  }
+  .unit { font-size: 13px; opacity: 0.6; letter-spacing: 0.3em; margin-bottom: 28px; }
+  button {
+    background: rgba(252,223,148,0.08);
+    border: 1px solid rgba(252,223,148,0.45);
+    color: #fcdf94;
+    padding: 13px 40px; font-size: 13px;
+    letter-spacing: 0.4em;
+    cursor: pointer; border-radius: 36px;
+    font-family: inherit;
+    transition: background 0.15s;
+  }
+  button:active { background: rgba(252,223,148,0.25); }
+  .back {
+    position: absolute; top: 14px; right: 18px;
+    color: rgba(243,238,222,0.5);
+    text-decoration: none;
+    font-size: 11px; letter-spacing: 0.2em;
+    z-index: 30;
+  }
+  .back:active { color: rgba(243,238,222,0.85); }
+</style>
+</head>
+<body>
+<a class="back" href="../../index.html">← 戻る</a>
+<div id="wrap">
+  <canvas id="canvas"></canvas>
+  <div class="hud" id="hud">
+    <div class="col">
+      <div class="label">高度</div>
+      <div class="value" id="alt">0</div>
+    </div>
+    <div class="col right">
+      <div class="label">残り</div>
+      <div class="value" id="time">60</div>
+      <div class="lives" id="lives">◆◆◆</div>
+    </div>
+  </div>
+  <div class="overlay" id="start">
+    <h1>凧</h1>
+    <div class="sub">指を滑らせて凧を操れ<br>金の風に乗って高く揚げよ<br>鳥と雷雲には触れぬよう<br>舞う紙鶴はそっと掴め</div>
+    <button id="startBtn">揚 げ る</button>
+  </div>
+  <div class="overlay hidden" id="end">
+    <h1 id="endTitle">日 暮</h1>
+    <div class="sub" id="endSub" style="margin-bottom:8px;">届いた高さ</div>
+    <div class="big" id="finalAlt">0</div>
+    <div class="unit">尺</div>
+    <button id="restartBtn">も う 一 度</button>
+  </div>
+</div>
+<script>
+(function(){
+  'use strict';
+
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  let W = 0, H = 0, DPR = 1;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    canvas.width = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ----- State -----
+  let state = 'start'; // 'start' | 'play' | 'end'
+  let altitude = 0;
+  let lives = 3;
+  let timeLeft = 60;
+  let lastTime = 0;
+  let camShake = 0;
+  let boost = 0;
+  let flashWhite = 0;
+
+  const kite = {
+    x: W / 2, y: H * 0.58,
+    targetX: W / 2,
+    vx: 0,
+    angle: 0,
+    tail: [],
+    invuln: 0,
+  };
+
+  let updrafts = [];
+  let storms = [];
+  let birds = [];
+  let cranes = [];
+  let particles = [];
+  let stars = [];
+  let cloudsFar = [];
+  let cloudsNear = [];
+
+  let touchActive = false;
+  let touchX = W / 2;
+
+  function vibrate(ms) {
+    if (navigator.vibrate) { try { navigator.vibrate(ms); } catch (e) {} }
+  }
+
+  function initBg() {
+    stars.length = 0;
+    for (let i = 0; i < 60; i++) {
+      stars.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        r: 0.4 + Math.random() * 1.4,
+        tw: Math.random() * Math.PI * 2,
+      });
+    }
+    cloudsFar.length = 0;
+    for (let i = 0; i < 5; i++) {
+      cloudsFar.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        w: 80 + Math.random() * 80,
+        h: 16 + Math.random() * 12,
+        op: 0.12 + Math.random() * 0.1,
+      });
+    }
+    cloudsNear.length = 0;
+    for (let i = 0; i < 3; i++) {
+      cloudsNear.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        w: 120 + Math.random() * 100,
+        h: 28 + Math.random() * 18,
+        op: 0.22 + Math.random() * 0.12,
+      });
+    }
+  }
+
+  function reset() {
+    altitude = 0;
+    lives = 3;
+    timeLeft = 60;
+    boost = 0;
+    camShake = 0;
+    flashWhite = 0;
+    kite.x = W / 2; kite.y = H * 0.58;
+    kite.targetX = W / 2; kite.vx = 0;
+    kite.angle = 0; kite.tail.length = 0;
+    kite.invuln = 0;
+    updrafts.length = 0; storms.length = 0;
+    birds.length = 0; cranes.length = 0; particles.length = 0;
+    initBg();
+    spawnTimers.updraft = 0.6;
+    spawnTimers.storm = 2.0;
+    spawnTimers.bird = 2.4;
+    spawnTimers.crane = 1.2;
+  }
+
+  function startGame() {
+    reset();
+    state = 'play';
+    document.getElementById('start').classList.add('hidden');
+    document.getElementById('end').classList.add('hidden');
+    lastTime = performance.now();
+  }
+
+  function endGame() {
+    state = 'end';
+    document.getElementById('finalAlt').textContent = Math.floor(altitude);
+    if (lives <= 0) {
+      document.getElementById('endTitle').textContent = '糸 切';
+      document.getElementById('endSub').textContent = '凧は風に消えた';
+    } else {
+      document.getElementById('endTitle').textContent = '日 暮';
+      document.getElementById('endSub').textContent = '届いた高さ';
+    }
+    document.getElementById('end').classList.remove('hidden');
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  // ----- Touch -----
+  function getX(e) {
+    if (e.touches && e.touches.length > 0) return e.touches[0].clientX;
+    return e.clientX;
+  }
+  canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault(); touchActive = true; touchX = getX(e);
+  }, { passive: false });
+  canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault(); touchX = getX(e);
+  }, { passive: false });
+  canvas.addEventListener('touchend', (e) => {
+    e.preventDefault(); touchActive = false;
+  }, { passive: false });
+  canvas.addEventListener('mousedown', (e) => { touchActive = true; touchX = e.clientX; });
+  canvas.addEventListener('mousemove', (e) => { if (touchActive) touchX = e.clientX; });
+  canvas.addEventListener('mouseup', () => { touchActive = false; });
+  canvas.addEventListener('mouseleave', () => { touchActive = false; });
+
+  // ----- Spawning -----
+  const spawnTimers = { updraft: 1.0, storm: 2.5, bird: 3.0, crane: 1.5 };
+
+  function spawn(dt) {
+    const elapsed = 60 - timeLeft;
+    const difficulty = 1 + elapsed / 38;
+
+    spawnTimers.updraft -= dt;
+    spawnTimers.storm   -= dt;
+    spawnTimers.bird    -= dt;
+    spawnTimers.crane   -= dt;
+
+    if (spawnTimers.updraft <= 0) {
+      spawnTimers.updraft = 1.1 + Math.random() * 1.4;
+      updrafts.push({
+        x: 50 + Math.random() * (W - 100),
+        y: -60,
+        w: 42 + Math.random() * 28,
+        h: 110 + Math.random() * 60,
+        sparks: [],
+      });
+    }
+    if (spawnTimers.storm <= 0) {
+      spawnTimers.storm = (1.8 + Math.random() * 1.2) / difficulty;
+      storms.push({
+        x: 60 + Math.random() * (W - 120),
+        y: -70,
+        w: 90 + Math.random() * 60,
+        h: 50 + Math.random() * 24,
+        hit: false,
+        bolt: 0,
+      });
+    }
+    if (spawnTimers.bird <= 0) {
+      spawnTimers.bird = (1.8 + Math.random() * 1.4) / difficulty;
+      const left = Math.random() < 0.5;
+      birds.push({
+        x: left ? -30 : W + 30,
+        y: 80 + Math.random() * (H - 240),
+        vx: (left ? 1 : -1) * (55 + Math.random() * 45),
+        wing: Math.random() * Math.PI * 2,
+        hit: false,
+      });
+    }
+    if (spawnTimers.crane <= 0) {
+      spawnTimers.crane = 1.5 + Math.random() * 1.3;
+      cranes.push({
+        x: 30 + Math.random() * (W - 60),
+        y: -28,
+        rot: (Math.random() - 0.5) * 0.7,
+        vrot: (Math.random() - 0.5) * 1.2,
+        bob: Math.random() * Math.PI * 2,
+        taken: false,
+      });
+    }
+  }
+
+  // ----- Update -----
+  function update(now) {
+    let dt = (now - lastTime) / 1000;
+    if (dt > 0.05) dt = 0.05;
+    lastTime = now;
+
+    if (state !== 'play') { draw(dt); return; }
+
+    timeLeft -= dt;
+    if (timeLeft <= 0) {
+      timeLeft = 0;
+      endGame();
+      draw(dt);
+      return;
+    }
+
+    // Kite control
+    if (touchActive) {
+      kite.targetX = Math.max(28, Math.min(W - 28, touchX));
+    }
+    const dx = (kite.targetX - kite.x);
+    kite.vx = kite.vx * 0.82 + dx * 0.14;
+    kite.x += kite.vx * dt * 8;
+    kite.x = Math.max(24, Math.min(W - 24, kite.x));
+    kite.angle = Math.max(-0.55, Math.min(0.55, kite.vx * 0.012));
+    kite.y += Math.sin(now / 700) * 0.18;
+    if (kite.invuln > 0) kite.invuln -= dt;
+
+    // Tail trail
+    kite.tail.push({ x: kite.x, y: kite.y + 22, a: 1 });
+    if (kite.tail.length > 28) kite.tail.shift();
+    for (const t of kite.tail) t.a *= 0.94;
+
+    // Scroll & altitude
+    const baseScroll = 60 + Math.min(40, (60 - timeLeft) * 0.5);
+    const totalSpeed = baseScroll + boost;
+    altitude += totalSpeed * dt * 0.55;
+    boost = Math.max(0, boost - dt * 26);
+
+    // Background parallax
+    for (const s of stars) {
+      s.y += totalSpeed * dt * 0.15;
+      s.tw += dt * 2;
+      if (s.y > H) { s.y = -2; s.x = Math.random() * W; }
+    }
+    for (const c of cloudsFar) {
+      c.y += totalSpeed * dt * 0.35;
+      if (c.y - c.h > H) { c.y = -c.h; c.x = Math.random() * W; }
+    }
+    for (const c of cloudsNear) {
+      c.y += totalSpeed * dt * 0.75;
+      if (c.y - c.h > H) { c.y = -c.h; c.x = Math.random() * W; }
+    }
+
+    // Updrafts
+    for (let i = updrafts.length - 1; i >= 0; i--) {
+      const u = updrafts[i];
+      u.y += totalSpeed * dt;
+      // spawn sparks
+      if (Math.random() < 0.6) {
+        u.sparks.push({
+          x: u.x + (Math.random() - 0.5) * u.w * 0.8,
+          y: u.y + u.h,
+          vy: -50 - Math.random() * 60,
+          life: 1,
+          r: 0.8 + Math.random() * 1.5,
+        });
+      }
+      for (let j = u.sparks.length - 1; j >= 0; j--) {
+        const p = u.sparks[j];
+        p.y += p.vy * dt;
+        p.life -= dt * 1.4;
+        if (p.life <= 0) u.sparks.splice(j, 1);
+      }
+      // Kite inside?
+      if (
+        kite.x > u.x - u.w / 2 && kite.x < u.x + u.w / 2 &&
+        kite.y > u.y && kite.y < u.y + u.h
+      ) {
+        boost = Math.min(140, boost + dt * 110);
+        if (Math.random() < 0.4) {
+          particles.push({
+            x: kite.x + (Math.random() - 0.5) * 22,
+            y: kite.y + 5,
+            vx: (Math.random() - 0.5) * 30,
+            vy: 50 + Math.random() * 50,
+            life: 0.9,
+            col: '#fcdf94',
+            r: 1.6 + Math.random() * 1.6,
+          });
+        }
+      }
+      if (u.y > H + 80) updrafts.splice(i, 1);
+    }
+
+    // Storm clouds
+    for (let i = storms.length - 1; i >= 0; i--) {
+      const c = storms[i];
+      c.y += totalSpeed * dt;
+      c.bolt -= dt;
+      if (c.bolt < 0 && Math.random() < 0.02) c.bolt = 0.2;
+      if (
+        !c.hit && kite.invuln <= 0 &&
+        Math.abs(c.x - kite.x) < c.w * 0.42 &&
+        Math.abs(c.y - kite.y) < c.h * 0.55
+      ) {
+        c.hit = true;
+        loseLife('cloud', kite.x, kite.y);
+      }
+      if (c.y > H + 90) storms.splice(i, 1);
+    }
+
+    // Birds
+    for (let i = birds.length - 1; i >= 0; i--) {
+      const b = birds[i];
+      b.x += b.vx * dt;
+      b.y += totalSpeed * dt * 0.35;
+      b.wing += dt * 9;
+      if (
+        !b.hit && kite.invuln <= 0 &&
+        Math.hypot(b.x - kite.x, b.y - kite.y) < 22
+      ) {
+        b.hit = true;
+        loseLife('bird', kite.x, kite.y);
+      }
+      if (b.x < -60 || b.x > W + 60 || b.y > H + 80) birds.splice(i, 1);
+    }
+
+    // Cranes
+    for (let i = cranes.length - 1; i >= 0; i--) {
+      const cr = cranes[i];
+      cr.y += totalSpeed * dt * 0.9;
+      cr.rot += cr.vrot * dt;
+      cr.bob += dt * 3;
+      if (!cr.taken && Math.hypot(cr.x - kite.x, cr.y - kite.y) < 24) {
+        cr.taken = true;
+        altitude += 28;
+        camShake = Math.max(camShake, 2);
+        vibrate(18);
+        for (let k = 0; k < 18; k++) {
+          particles.push({
+            x: cr.x, y: cr.y,
+            vx: (Math.random() - 0.5) * 180,
+            vy: (Math.random() - 0.5) * 180,
+            life: 0.95,
+            col: Math.random() < 0.6 ? '#fcdf94' : '#f3eede',
+            r: 1.2 + Math.random() * 2,
+          });
+        }
+      }
+      if (cr.y > H + 60 || cr.taken) cranes.splice(i, 1);
+    }
+
+    // Particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vx *= 0.94; p.vy *= 0.94;
+      p.life -= dt * 1.6;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+
+    if (camShake > 0) camShake = Math.max(0, camShake - dt * 32);
+    if (flashWhite > 0) flashWhite = Math.max(0, flashWhite - dt * 3);
+
+    spawn(dt);
+    draw(dt);
+
+    // HUD
+    document.getElementById('alt').textContent = Math.floor(altitude);
+    document.getElementById('time').textContent = Math.ceil(timeLeft);
+    document.getElementById('lives').textContent =
+      '◆'.repeat(lives) + '◇'.repeat(3 - lives);
+  }
+
+  function loseLife(kind, x, y) {
+    lives--;
+    camShake = 11;
+    flashWhite = 0.5;
+    vibrate(kind === 'bird' ? 55 : 70);
+    kite.invuln = 1.2;
+    const col = kind === 'bird' ? '#cfb98a' : '#a4adc8';
+    for (let k = 0; k < 18; k++) {
+      particles.push({
+        x: x, y: y,
+        vx: (Math.random() - 0.5) * 240,
+        vy: (Math.random() - 0.5) * 240,
+        life: 0.85,
+        col,
+        r: 1.5 + Math.random() * 2.5,
+      });
+    }
+    if (lives <= 0) endGame();
+  }
+
+  // ----- Draw -----
+  function draw(dt) {
+    // Sky gradient by altitude
+    const t = Math.min(1, altitude / 1800);
+    // Low altitude: dawn (deep blue → warm rose at horizon)
+    // High altitude: night (deep purple-black → indigo)
+    const topR = lerp(28, 6, t);
+    const topG = lerp(24, 4, t);
+    const topB = lerp(58, 24, t);
+    const botR = lerp(86, 20, t);
+    const botG = lerp(58, 14, t);
+    const botB = lerp(82, 50, t);
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, `rgb(${topR|0},${topG|0},${topB|0})`);
+    grad.addColorStop(1, `rgb(${botR|0},${botG|0},${botB|0})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    let sx = 0, sy = 0;
+    if (camShake > 0.05) {
+      sx = (Math.random() - 0.5) * camShake;
+      sy = (Math.random() - 0.5) * camShake;
+    }
+    ctx.save();
+    ctx.translate(sx, sy);
+
+    // Stars (visible more as altitude rises)
+    ctx.fillStyle = '#f3eede';
+    for (const s of stars) {
+      const a = (0.2 + t * 0.7) * (0.5 + 0.5 * Math.sin(s.tw));
+      ctx.globalAlpha = a;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Far clouds
+    for (const c of cloudsFar) drawSoftCloud(c.x, c.y, c.w, c.h, c.op, '#f3eede');
+
+    // Updrafts
+    for (const u of updrafts) {
+      const g = ctx.createLinearGradient(0, u.y, 0, u.y + u.h);
+      g.addColorStop(0, 'rgba(252,223,148,0)');
+      g.addColorStop(0.4, 'rgba(252,223,148,0.16)');
+      g.addColorStop(0.7, 'rgba(252,223,148,0.22)');
+      g.addColorStop(1, 'rgba(252,223,148,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(u.x, u.y + u.h / 2, u.w / 2, u.h / 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Sparks
+      for (const p of u.sparks) {
+        ctx.globalAlpha = Math.max(0, p.life) * 0.85;
+        ctx.fillStyle = '#fcdf94';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // Near clouds (in front of updrafts but behind storms)
+    for (const c of cloudsNear) drawSoftCloud(c.x, c.y, c.w, c.h, c.op, '#dcd5c2');
+
+    // Storm clouds
+    for (const c of storms) drawStorm(c);
+
+    // Cranes
+    for (const cr of cranes) drawCrane(cr);
+
+    // Birds
+    for (const b of birds) drawBird(b);
+
+    // Kite
+    drawKite();
+
+    // Particles
+    for (const p of particles) {
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fillStyle = p.col;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Boost vignette
+    if (boost > 8) {
+      const op = Math.min(0.25, boost / 600);
+      const vg = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.2, W/2, H/2, Math.max(W,H)*0.65);
+      vg.addColorStop(0, 'rgba(252,223,148,0)');
+      vg.addColorStop(1, `rgba(252,223,148,${op})`);
+      ctx.fillStyle = vg;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // White flash
+    if (flashWhite > 0.01) {
+      ctx.fillStyle = `rgba(255,255,255,${flashWhite * 0.4})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    ctx.restore();
+  }
+
+  function drawSoftCloud(x, y, w, h, op, col) {
+    ctx.save();
+    ctx.fillStyle = col;
+    ctx.globalAlpha = op;
+    ctx.beginPath();
+    ctx.ellipse(x - w*0.25, y, w*0.35, h*0.7, 0, 0, Math.PI*2);
+    ctx.ellipse(x + w*0.25, y, w*0.35, h*0.7, 0, 0, Math.PI*2);
+    ctx.ellipse(x, y - h*0.2, w*0.42, h*0.9, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawStorm(c) {
+    ctx.save();
+    // Body
+    ctx.fillStyle = c.hit ? 'rgba(80,90,120,0.35)' : 'rgba(58,64,94,0.92)';
+    ctx.beginPath();
+    ctx.ellipse(c.x - c.w*0.28, c.y, c.w*0.36, c.h*0.7, 0, 0, Math.PI*2);
+    ctx.ellipse(c.x + c.w*0.28, c.y, c.w*0.36, c.h*0.7, 0, 0, Math.PI*2);
+    ctx.ellipse(c.x, c.y - c.h*0.22, c.w*0.42, c.h*0.95, 0, 0, Math.PI*2);
+    ctx.ellipse(c.x - c.w*0.05, c.y + c.h*0.15, c.w*0.5, c.h*0.55, 0, 0, Math.PI*2);
+    ctx.fill();
+    // Highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    ctx.beginPath();
+    ctx.ellipse(c.x - c.w*0.12, c.y - c.h*0.35, c.w*0.18, c.h*0.3, 0, 0, Math.PI*2);
+    ctx.fill();
+    // Bolt
+    if (c.bolt > 0) {
+      ctx.strokeStyle = '#fcdf94';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = '#fcdf94';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      let bx = c.x, by = c.y + c.h*0.2;
+      ctx.moveTo(bx, by);
+      for (let i = 0; i < 3; i++) {
+        bx += (Math.random() - 0.5) * 14;
+        by += 10 + Math.random() * 8;
+        ctx.lineTo(bx, by);
+      }
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+    ctx.restore();
+  }
+
+  function drawCrane(cr) {
+    ctx.save();
+    ctx.translate(cr.x, cr.y + Math.sin(cr.bob) * 3);
+    ctx.rotate(cr.rot);
+    ctx.shadowColor = 'rgba(252,223,148,0.6)';
+    ctx.shadowBlur = 10;
+    // Origami crane stylized silhouette
+    ctx.fillStyle = '#f3eede';
+    ctx.beginPath();
+    // Left wing
+    ctx.moveTo(0, -4);
+    ctx.lineTo(-15, -10);
+    ctx.lineTo(-8, 2);
+    ctx.lineTo(-15, 8);
+    ctx.lineTo(-3, 4);
+    // Body bottom
+    ctx.lineTo(0, 10);
+    ctx.lineTo(3, 4);
+    // Right wing
+    ctx.lineTo(15, 8);
+    ctx.lineTo(8, 2);
+    ctx.lineTo(15, -10);
+    ctx.lineTo(0, -4);
+    ctx.closePath();
+    ctx.fill();
+    // Beak
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#fcdf94';
+    ctx.beginPath();
+    ctx.moveTo(0, -4);
+    ctx.lineTo(2, -12);
+    ctx.lineTo(-1, -10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawBird(b) {
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    ctx.strokeStyle = '#1c1f30';
+    ctx.lineWidth = 2.4;
+    ctx.lineCap = 'round';
+    const w = Math.sin(b.wing) * 7;
+    ctx.beginPath();
+    ctx.moveTo(-13, w);
+    ctx.quadraticCurveTo(-6, -5, 0, 0);
+    ctx.quadraticCurveTo(6, -5, 13, w);
+    ctx.stroke();
+    // Body dot
+    ctx.fillStyle = '#1c1f30';
+    ctx.beginPath();
+    ctx.arc(0, 1, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawKite() {
+    // Tail trail (ribbons)
+    if (kite.tail.length > 1) {
+      for (let i = 1; i < kite.tail.length; i++) {
+        const a = kite.tail[i-1], b = kite.tail[i];
+        const offset = (kite.tail.length - i) * 2.4;
+        ctx.strokeStyle = `rgba(252,223,148,${a.a * 0.55})`;
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y + offset);
+        ctx.lineTo(b.x, b.y + offset + 2);
+        ctx.stroke();
+      }
+    }
+
+    // Kite body
+    ctx.save();
+    ctx.translate(kite.x, kite.y);
+    ctx.rotate(kite.angle);
+
+    const blink = kite.invuln > 0 && Math.floor(kite.invuln * 12) % 2 === 0;
+    if (blink) ctx.globalAlpha = 0.4;
+
+    const kw = 28, kh = 42;
+    // Shadow
+    ctx.shadowColor = 'rgba(0,0,0,0.45)';
+    ctx.shadowBlur = 10;
+    ctx.shadowOffsetY = 4;
+    // Diamond body
+    ctx.fillStyle = '#d44432';
+    ctx.beginPath();
+    ctx.moveTo(0, -kh/2);
+    ctx.lineTo(kw/2, -2);
+    ctx.lineTo(0, kh/2);
+    ctx.lineTo(-kw/2, -2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+    // Top half lighter
+    ctx.fillStyle = '#e8543e';
+    ctx.beginPath();
+    ctx.moveTo(0, -kh/2);
+    ctx.lineTo(kw/2, -2);
+    ctx.lineTo(0, -2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(0, -kh/2);
+    ctx.lineTo(-kw/2, -2);
+    ctx.lineTo(0, -2);
+    ctx.closePath();
+    ctx.fill();
+    // Cross frame
+    ctx.strokeStyle = 'rgba(252,223,148,0.85)';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(0, -kh/2); ctx.lineTo(0, kh/2);
+    ctx.moveTo(-kw/2, -2); ctx.lineTo(kw/2, -2);
+    ctx.stroke();
+    // Center dot
+    ctx.fillStyle = '#fcdf94';
+    ctx.beginPath();
+    ctx.arc(0, -2, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    // Ribbon tassels below kite (small flutter)
+    const tt = performance.now() / 200;
+    ctx.strokeStyle = 'rgba(232,84,62,0.7)';
+    ctx.lineWidth = 1.6;
+    for (let i = -1; i <= 1; i += 2) {
+      ctx.beginPath();
+      ctx.moveTo(kite.x + i * 4, kite.y + 18);
+      ctx.quadraticCurveTo(
+        kite.x + i * 4 + Math.sin(tt + i) * 4, kite.y + 26,
+        kite.x + i * 4 + Math.sin(tt + i + 1) * 6, kite.y + 34
+      );
+      ctx.stroke();
+    }
+  }
+
+  function lerp(a, b, t) { return a + (b - a) * t; }
+
+  function loop(t) {
+    update(t);
+    requestAnimationFrame(loop);
+  }
+
+  initBg();
+  requestAnimationFrame((t) => { lastTime = t; loop(t); });
+})();
+</script>
+</body>
+</html>
