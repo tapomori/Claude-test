@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a12">
+<title>灯火 — Tomoshibi</title>
+<style>
+  :root { --gold:#ffcf7a; --ember:#ff8a4c; --teal:#6fe3d8; --red:#ff5d6c; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body {
+    width:100%; height:100%; overflow:hidden;
+    background:#0a0a12; color:#e8e6f0;
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;
+    -webkit-user-select:none; user-select:none;
+    -webkit-tap-highlight-color:transparent;
+    touch-action:manipulation; overscroll-behavior:none;
+  }
+  #c { display:block; width:100vw; height:100vh; touch-action:none; }
+  a.back {
+    position:fixed; top:max(10px,env(safe-area-inset-top)); left:max(12px,env(safe-area-inset-left));
+    z-index:10; color:#9b97b8; text-decoration:none; font-size:13px;
+    padding:7px 12px; border:1px solid rgba(155,151,184,.35);
+    border-radius:999px; background:rgba(10,10,18,.45); backdrop-filter:blur(4px);
+  }
+  a.back:active { color:#e8e6f0; }
+  #overlay {
+    position:fixed; inset:0; z-index:20; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center; gap:18px;
+    background:radial-gradient(ellipse at 50% 40%, rgba(20,16,30,.55), rgba(10,10,18,.92));
+    backdrop-filter:blur(2px); padding:24px;
+  }
+  #overlay.hidden { display:none; }
+  #overlay h1 { font-size:40px; font-weight:600; letter-spacing:.18em; color:var(--gold);
+    text-shadow:0 0 24px rgba(255,180,90,.55); }
+  #overlay .sub { font-size:14px; line-height:1.9; color:#cfc9e0; max-width:300px; }
+  #overlay .big { font-size:22px; color:#fff; }
+  #overlay button {
+    margin-top:6px; font:inherit; font-size:17px; letter-spacing:.1em; color:#0a0a12;
+    background:linear-gradient(180deg,#ffd98a,#ff9d52); border:none; cursor:pointer;
+    padding:13px 34px; border-radius:999px; box-shadow:0 6px 24px rgba(255,150,70,.35);
+  }
+  #overlay button:active { transform:translateY(1px); }
+  .hint { font-size:12px; color:#8b86a3; letter-spacing:.05em; }
+</style>
+</head>
+<body>
+<a class="back" href="../../index.html">‹ 一覧へ</a>
+<canvas id="c"></canvas>
+<div id="overlay">
+  <h1>灯火</h1>
+  <div class="sub">指を左右にすべらせて土台を動かし、<br>竿の先の<b style="color:var(--gold)">灯</b>を倒さぬよう支える。<br>漂う<b style="color:var(--ember)">火の粉</b>を炎で受けて福を集めよ。</div>
+  <button id="startBtn">灯す</button>
+  <div class="hint">画面のどこでも指でなぞって操作</div>
+</div>
+<script>
+(() => {
+  const cv = document.getElementById('c');
+  const ctx = cv.getContext('2d');
+  const overlay = document.getElementById('overlay');
+  const startBtn = document.getElementById('startBtn');
+  let W = 0, H = 0, DPR = 1;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2.5);
+    W = window.innerWidth; H = window.innerHeight;
+    cv.width = W * DPR; cv.height = H * DPR;
+    cv.style.width = W + 'px'; cv.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  const vib = (ms) => { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
+  const rand = (a, b) => a + Math.random() * (b - a);
+
+  // --- game state ---
+  let state = 'menu'; // menu | play | over
+  let groundY = 0, baseX = 0, baseTarget = 0, prevBaseX = 0, baseVel = 0, prevBaseVel = 0;
+  let L = 0;            // pole length in px
+  let theta = 0, omega = 0; // angle from vertical (rad), angular vel
+  let score = 0, best = 0, t0 = 0, elapsed = 0;
+  let combo = 0, comboTimer = 0;
+  let sparks = [], particles = [], windPuffs = [];
+  let nextSpark = 0, nextGust = 0, gust = 0;
+  let pointerActive = false;
+  let flicker = 0;
+  let shake = 0;
+
+  try { best = parseInt(localStorage.getItem('tomoshibi_best') || '0', 10) || 0; } catch (e) {}
+
+  function reset() {
+    groundY = H * 0.84;
+    L = Math.min(H * 0.42, W * 1.1);
+    baseX = baseTarget = prevBaseX = W / 2;
+    baseVel = prevBaseVel = 0;
+    theta = rand(-0.05, 0.05); omega = 0;
+    score = 0; combo = 0; comboTimer = 0;
+    sparks = []; particles = []; windPuffs = [];
+    nextSpark = 0.8; nextGust = rand(4, 7); gust = 0;
+    elapsed = 0; flicker = 0; shake = 0;
+    t0 = performance.now();
+  }
+
+  function start() {
+    reset();
+    state = 'play';
+    overlay.classList.add('hidden');
+  }
+  startBtn.addEventListener('click', start);
+
+  // --- input ---
+  function setTargetFromX(x) {
+    baseTarget = Math.max(W * 0.12, Math.min(W * 0.88, x));
+  }
+  function onDown(x) { pointerActive = true; setTargetFromX(x); }
+  function onMove(x) { if (pointerActive) setTargetFromX(x); }
+  function onUp() { pointerActive = false; }
+
+  cv.addEventListener('touchstart', e => { e.preventDefault(); onDown(e.touches[0].clientX); }, { passive: false });
+  cv.addEventListener('touchmove',  e => { e.preventDefault(); onMove(e.touches[0].clientX); }, { passive: false });
+  cv.addEventListener('touchend',   e => { e.preventDefault(); onUp(); }, { passive: false });
+  cv.addEventListener('mousedown',  e => onDown(e.clientX));
+  window.addEventListener('mousemove', e => onMove(e.clientX));
+  window.addEventListener('mouseup', onUp);
+
+  function tipPos() {
+    return { x: baseX + Math.sin(theta) * L, y: groundY - Math.cos(theta) * L };
+  }
+
+  function spawnSpark() {
+    const x = rand(W * 0.15, W * 0.85);
+    sparks.push({ x, y: -20, vx: rand(-15, 15), vy: rand(28, 52),
+                  ph: rand(0, 6.28), r: rand(4.5, 7) });
+  }
+
+  function burst(x, y, color, n) {
+    for (let i = 0; i < n; i++) {
+      const a = rand(0, 6.28), s = rand(40, 220);
+      particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 40,
+                       life: 1, color, r: rand(1.5, 3.5) });
+    }
+  }
+
+  function gameOver() {
+    state = 'over';
+    if (score > best) { best = score; try { localStorage.setItem('tomoshibi_best', String(best)); } catch (e) {} }
+    const t = tipPos();
+    burst(t.x, t.y, '#ff8a4c', 26);
+    vib([30, 40, 60]);
+    overlay.classList.remove('hidden');
+    overlay.innerHTML =
+      '<h1 style="font-size:30px">消えた…</h1>' +
+      '<div class="big">福 ' + score + '</div>' +
+      '<div class="sub">' + Math.floor(elapsed) + ' 秒　灯を支えた<br>最高 ' + best + ' 福</div>' +
+      '<button id="rb">もう一度灯す</button>' +
+      '<div class="hint">画面のどこでも指でなぞって操作</div>';
+    document.getElementById('rb').addEventListener('click', start);
+  }
+
+  // --- update ---
+  function update(dt) {
+    elapsed += dt;
+
+    // base follows finger; derive accel that drives the pole
+    prevBaseX = baseX;
+    const ease = 1 - Math.pow(0.0009, dt); // responsive smoothing
+    baseX += (baseTarget - baseX) * ease;
+    prevBaseVel = baseVel;
+    baseVel = (baseX - prevBaseX) / dt;
+    let a = (baseVel - prevBaseVel) / dt;
+    a = Math.max(-9000, Math.min(9000, a));
+
+    // wind gust forcing
+    nextGust -= dt;
+    if (nextGust <= 0) {
+      gust = rand(-1, 1) * rand(2.0, 4.2) * (1 + elapsed * 0.012);
+      windPuffs.push({ x: gust > 0 ? -10 : W + 10, dir: Math.sign(gust),
+                       y: groundY - rand(L * 0.5, L), life: 1 });
+      nextGust = rand(3.2, 6.5);
+      vib(8);
+    }
+    gust *= Math.pow(0.06, dt); // decays
+    const wind = gust * 0.9;
+
+    // inverted pendulum dynamics
+    const g = 2000;
+    const angAcc = (g * Math.sin(theta) - a * Math.cos(theta)) / L + wind;
+    omega += angAcc * dt;
+    omega *= Math.pow(0.55, dt); // damping for playability
+    theta += omega * dt;
+
+    if (Math.abs(theta) > 1.05) { gameOver(); return; }
+
+    flicker += dt * (10 + Math.abs(omega) * 4);
+    shake *= Math.pow(0.02, dt);
+
+    // combo decay
+    if (comboTimer > 0) { comboTimer -= dt; if (comboTimer <= 0) combo = 0; }
+
+    // sparks
+    nextSpark -= dt;
+    const rate = Math.max(0.55, 1.5 - elapsed * 0.02);
+    if (nextSpark <= 0) { spawnSpark(); nextSpark = rate; }
+    const tip = tipPos();
+    for (let i = sparks.length - 1; i >= 0; i--) {
+      const s = sparks[i];
+      s.x += s.vx * dt; s.y += s.vy * dt;
+      s.vy += 12 * dt;
+      const dx = s.x - tip.x, dy = s.y - tip.y;
+      if (dx * dx + dy * dy < 34 * 34) {
+        combo++; comboTimer = 2.2;
+        const gain = 5 + Math.min(combo, 10);
+        score += gain;
+        burst(tip.x, tip.y, '#ffd98a', 12);
+        // a caught spark feeds the flame: tiny stabilizing nudge
+        omega *= 0.82;
+        vib(combo > 3 ? [10, 20] : 12);
+        sparks.splice(i, 1);
+        continue;
+      }
+      if (s.y > H + 30) sparks.splice(i, 1);
+    }
+
+    // wind puffs visuals
+    for (let i = windPuffs.length - 1; i >= 0; i--) {
+      const p = windPuffs[i];
+      p.x += p.dir * 380 * dt; p.life -= dt * 0.8;
+      if (p.life <= 0 || p.x < -40 || p.x > W + 40) windPuffs.splice(i, 1);
+    }
+
+    // particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 320 * dt;
+      p.vx *= Math.pow(0.1, dt); p.life -= dt * 1.6;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+
+    // survival score (福 ticks)
+    score += dt * 4;
+  }
+
+  // --- render ---
+  function draw() {
+    const sx = (Math.random() - 0.5) * shake, sy = (Math.random() - 0.5) * shake;
+    ctx.save();
+    ctx.translate(sx, sy);
+
+    // background
+    const bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, '#0c0a18');
+    bg.addColorStop(0.55, '#0a0a12');
+    bg.addColorStop(1, '#06060c');
+    ctx.fillStyle = bg; ctx.fillRect(-20, -20, W + 40, H + 40);
+
+    const tip = state === 'menu' ? { x: W / 2, y: groundY - (L || H * 0.42) } : tipPos();
+
+    // flame ambient glow on scene
+    if (state !== 'menu') {
+      const fl = 1 + Math.sin(flicker) * 0.06;
+      const gl = ctx.createRadialGradient(tip.x, tip.y, 0, tip.x, tip.y, 260 * fl);
+      gl.addColorStop(0, 'rgba(255,170,80,0.22)');
+      gl.addColorStop(1, 'rgba(255,170,80,0)');
+      ctx.fillStyle = gl; ctx.fillRect(-20, -20, W + 40, H + 40);
+    }
+
+    // wind puffs
+    ctx.lineWidth = 2;
+    for (const p of windPuffs) {
+      ctx.strokeStyle = 'rgba(160,200,230,' + (p.life * 0.28) + ')';
+      ctx.beginPath();
+      for (let k = 0; k < 3; k++) {
+        const yy = p.y + k * 14 - 14;
+        ctx.moveTo(p.x - p.dir * 60, yy);
+        ctx.quadraticCurveTo(p.x - p.dir * 20, yy - 8, p.x + p.dir * 30, yy);
+      }
+      ctx.stroke();
+    }
+
+    if (state !== 'menu') {
+      // ground line + base
+      ctx.strokeStyle = 'rgba(120,110,150,0.35)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(0, groundY); ctx.lineTo(W, groundY); ctx.stroke();
+
+      // base (the "hand" you control)
+      ctx.fillStyle = pointerActive ? '#ffd98a' : '#bcb4d6';
+      ctx.beginPath();
+      ctx.moveTo(baseX - 26, groundY + 16);
+      ctx.lineTo(baseX + 26, groundY + 16);
+      ctx.lineTo(baseX + 14, groundY);
+      ctx.lineTo(baseX - 14, groundY);
+      ctx.closePath(); ctx.fill();
+      // base guide marker for target
+      ctx.strokeStyle = 'rgba(255,217,138,0.25)';
+      ctx.beginPath(); ctx.moveTo(baseTarget, groundY + 22); ctx.lineTo(baseTarget, groundY + 30); ctx.stroke();
+
+      // pole (tapered reed)
+      const grad = ctx.createLinearGradient(baseX, groundY, tip.x, tip.y);
+      grad.addColorStop(0, '#5a4a3a');
+      grad.addColorStop(1, '#caa36a');
+      ctx.strokeStyle = grad;
+      ctx.lineCap = 'round';
+      ctx.lineWidth = 7;
+      ctx.beginPath(); ctx.moveTo(baseX, groundY); ctx.lineTo(tip.x, tip.y); ctx.stroke();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(255,230,180,0.5)';
+      ctx.beginPath(); ctx.moveTo(baseX, groundY); ctx.lineTo(tip.x, tip.y); ctx.stroke();
+
+      // flame at tip
+      const fl = 1 + Math.sin(flicker) * 0.12 + Math.sin(flicker * 2.3) * 0.05;
+      const lean = Math.min(1, Math.abs(theta) / 1.05);
+      // danger color shift
+      const inner = lean > 0.7 ? '#fff0e0' : '#fff6e0';
+      ctx.save();
+      ctx.translate(tip.x, tip.y);
+      // outer glow
+      const fg = ctx.createRadialGradient(0, -6, 0, 0, -6, 30 * fl);
+      fg.addColorStop(0, 'rgba(255,200,110,0.95)');
+      fg.addColorStop(0.5, 'rgba(255,140,70,0.5)');
+      fg.addColorStop(1, 'rgba(255,120,60,0)');
+      ctx.fillStyle = fg;
+      ctx.beginPath(); ctx.arc(0, -6, 30 * fl, 0, 6.28); ctx.fill();
+      // flame body
+      ctx.fillStyle = lean > 0.75 ? '#ff7a4c' : '#ffae5a';
+      ctx.beginPath();
+      ctx.moveTo(0, -22 * fl);
+      ctx.quadraticCurveTo(11 * fl, -10, 7, 2);
+      ctx.quadraticCurveTo(0, 9, -7, 2);
+      ctx.quadraticCurveTo(-11 * fl, -10, 0, -22 * fl);
+      ctx.fill();
+      ctx.fillStyle = inner;
+      ctx.beginPath();
+      ctx.moveTo(0, -13 * fl);
+      ctx.quadraticCurveTo(5, -6, 3.5, 1);
+      ctx.quadraticCurveTo(0, 5, -3.5, 1);
+      ctx.quadraticCurveTo(-5, -6, 0, -13 * fl);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // sparks
+    for (const s of sparks) {
+      const tw = 0.6 + 0.4 * Math.sin(s.ph + flicker * 1.5);
+      const sg = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, s.r * 2.4);
+      sg.addColorStop(0, 'rgba(255,180,110,' + tw + ')');
+      sg.addColorStop(1, 'rgba(255,140,70,0)');
+      ctx.fillStyle = sg;
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r * 2.4, 0, 6.28); ctx.fill();
+      ctx.fillStyle = '#fff1d6';
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r * 0.5, 0, 6.28); ctx.fill();
+    }
+
+    // particles
+    for (const p of particles) {
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 6.28); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    ctx.restore();
+
+    // HUD
+    if (state === 'play' || state === 'over') {
+      ctx.fillStyle = '#fff';
+      ctx.font = '600 30px -apple-system,sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('福 ' + Math.floor(score), W / 2, 56);
+      ctx.fillStyle = '#8b86a3';
+      ctx.font = '13px -apple-system,sans-serif';
+      ctx.fillText(Math.floor(elapsed) + ' 秒　最高 ' + best, W / 2, 78);
+
+      if (combo > 1 && comboTimer > 0) {
+        ctx.fillStyle = 'rgba(255,200,120,' + Math.min(1, comboTimer) + ')';
+        ctx.font = '600 18px -apple-system,sans-serif';
+        ctx.fillText(combo + ' 連', W / 2, 102);
+      }
+
+      // lean danger bar
+      const lean = Math.abs(theta) / 1.05;
+      const bw = Math.min(W * 0.6, 230), bx = (W - bw) / 2, by = H - 34;
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      ctx.fillRect(bx, by, bw, 6);
+      ctx.fillStyle = lean > 0.7 ? '#ff5d6c' : (lean > 0.45 ? '#ffae5a' : '#6fe3d8');
+      ctx.fillRect(bx + bw / 2, by, (theta / 1.05) * (bw / 2), 6);
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      ctx.fillRect(bx + bw / 2 - 1, by - 2, 2, 10);
+      if (lean > 0.62) shake = Math.max(shake, (lean - 0.62) * 14);
+    }
+  }
+
+  // --- loop ---
+  let last = performance.now();
+  function loop(now) {
+    let dt = (now - last) / 1000; last = now;
+    if (dt > 0.033) dt = 0.033;
+    if (state === 'play') update(dt);
+    else if (state === 'menu') flicker += dt * 6;
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
