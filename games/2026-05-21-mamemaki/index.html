@@ -1,0 +1,643 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0612">
+<title>Mamemaki - 節分</title>
+<style>
+  * { box-sizing: border-box; touch-action: none; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0a0612; color: #fff; font-family: -apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif; }
+  #stage { position: fixed; inset: 0; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .hud { position: absolute; top: env(safe-area-inset-top, 0); left: 0; right: 0; display: flex; justify-content: space-between; padding: 14px 16px; pointer-events: none; font-feature-settings: "tnum"; z-index: 3; }
+  .stat { background: rgba(0,0,0,0.45); padding: 6px 12px; border-radius: 999px; font-size: 13px; letter-spacing: 0.08em; color: #d8c8d8; }
+  .stat b { color: #ffd25e; font-weight: 700; font-size: 16px; padding-left: 4px; }
+  .back { position: absolute; top: calc(env(safe-area-inset-top, 0) + 56px); left: 12px; color: #ffeaea; font-size: 12px; text-decoration: none; opacity: 0.55; z-index: 5; padding: 5px 10px; background: rgba(0,0,0,0.35); border-radius: 999px; }
+  .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 14px; background: radial-gradient(circle at center, rgba(40,12,28,0.65), rgba(0,0,0,0.88)); z-index: 10; padding: 28px; text-align: center; }
+  .overlay.hidden { display: none; }
+  .overlay h1 { font-size: 38px; margin: 4px 0; letter-spacing: 0.22em; color: #ffe3a8; text-shadow: 0 2px 18px rgba(255,200,100,0.45); font-weight: 700; }
+  .overlay h2 { font-size: 22px; margin: 0; color: #ffd25e; letter-spacing: 0.12em; }
+  .overlay p { font-size: 14px; color: #c8c0d0; line-height: 1.7; margin: 0; max-width: 320px; }
+  .overlay .accent { color: #ffd25e; font-weight: 700; }
+  .overlay .demon { color: #ff8166; font-weight: 700; }
+  .btn { background: linear-gradient(180deg, #d04a3a, #8a1f1f); color: #fff; border: none; padding: 14px 38px; border-radius: 999px; font-size: 16px; letter-spacing: 0.14em; font-weight: 700; box-shadow: 0 6px 18px rgba(200,50,50,0.5), inset 0 1px 0 rgba(255,255,255,0.25); cursor: pointer; }
+  .btn:active { transform: translateY(1px); box-shadow: 0 3px 8px rgba(200,50,50,0.4); }
+  .label { font-size: 11px; letter-spacing: 0.32em; opacity: 0.6; }
+  .score-big { font-size: 64px; font-weight: 700; color: #ffd25e; text-shadow: 0 4px 28px rgba(255,200,100,0.45); line-height: 1; margin: 4px 0; }
+  .gallery-link { color: #c8c0d0; font-size: 12px; opacity: 0.7; text-decoration: none; margin-top: 6px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="c"></canvas>
+  <a class="back" href="../../index.html">← ギャラリー</a>
+  <div class="hud">
+    <div class="stat">のこり<b id="time">60</b></div>
+    <div class="stat">福<b id="score">0</b></div>
+    <div class="stat">×<b id="combo">1</b></div>
+  </div>
+  <div class="overlay" id="title">
+    <div class="label">SETSUBUN ・ 節分</div>
+    <h1>豆まき</h1>
+    <p>下から上へ素早くフリック。<br>豆は勢いそのまま弧を描く。<br><span class="demon">鬼</span>に当てれば福ポイント、<br><span class="accent">福</span>に当てれば福が逃げる。</p>
+    <button class="btn" id="startBtn">はじめる</button>
+    <p style="opacity:0.45; font-size:11px; letter-spacing:0.18em;">鬼は外、福は内</p>
+  </div>
+  <div class="overlay hidden" id="end">
+    <div class="label">RESULT</div>
+    <h2 id="endRank">節分の夜</h2>
+    <div class="score-big" id="endScore">0</div>
+    <div class="label">福ポイント</div>
+    <p id="endStats" style="opacity:0.7; font-size:12px;"></p>
+    <button class="btn" id="againBtn">もう一度</button>
+    <a class="gallery-link" href="../../index.html">ギャラリーへ戻る</a>
+  </div>
+</div>
+<script>
+(() => {
+  const cvs = document.getElementById('c');
+  const ctx = cvs.getContext('2d');
+  let W = 0, H = 0, DPR = 1;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    cvs.style.width = W + 'px';
+    cvs.style.height = H + 'px';
+    cvs.width = Math.floor(W * DPR);
+    cvs.height = Math.floor(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    setupWindows();
+  }
+
+  const $time = document.getElementById('time');
+  const $score = document.getElementById('score');
+  const $combo = document.getElementById('combo');
+  const $title = document.getElementById('title');
+  const $end = document.getElementById('end');
+  const $endScore = document.getElementById('endScore');
+  const $endRank = document.getElementById('endRank');
+  const $endStats = document.getElementById('endStats');
+  const $startBtn = document.getElementById('startBtn');
+  const $againBtn = document.getElementById('againBtn');
+
+  const state = {
+    running: false,
+    time: 60,
+    score: 0,
+    combo: 1,
+    maxCombo: 1,
+    hits: 0,
+    misses: 0,
+    beans: [],
+    targets: [],
+    particles: [],
+    floaters: [],
+    floating: [],
+    lastSpawn: 0,
+    elapsed: 0,
+    windows: [],
+    trail: [],
+  };
+
+  function setupWindows() {
+    const cx = W * 0.5;
+    const houseTopY = H * 0.20;
+    const houseBotY = H * 0.58;
+    const houseW = Math.min(W * 0.86, 480);
+    state.windows = [
+      { x: cx,                       y: houseTopY + 44,  w: 50, h: 50 },
+      { x: cx - houseW * 0.30,       y: houseTopY + 122, w: 60, h: 60 },
+      { x: cx + houseW * 0.30,       y: houseTopY + 122, w: 60, h: 60 },
+      { x: cx - houseW * 0.32,       y: houseBotY - 58,  w: 64, h: 64 },
+      { x: cx + houseW * 0.32,       y: houseBotY - 58,  w: 64, h: 64 },
+      { x: cx,                       y: houseBotY - 38,  w: 72, h: 76 },
+    ];
+    if (state.floating.length === 0) {
+      for (let i = 0; i < 7; i++) {
+        state.floating.push({
+          x: Math.random() * W,
+          y: Math.random() * H * 0.55,
+          r: 7 + Math.random() * 9,
+          s: 0.2 + Math.random() * 0.4,
+          ph: Math.random() * Math.PI * 2,
+        });
+      }
+    }
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  function reset() {
+    state.running = true;
+    state.time = 60;
+    state.score = 0;
+    state.combo = 1;
+    state.maxCombo = 1;
+    state.hits = 0;
+    state.misses = 0;
+    state.beans = [];
+    state.targets = [];
+    state.particles = [];
+    state.floaters = [];
+    state.lastSpawn = 0;
+    state.elapsed = 0;
+    state.trail = [];
+    updateHud();
+  }
+
+  function updateHud() {
+    $time.textContent = Math.max(0, Math.ceil(state.time));
+    $score.textContent = state.score;
+    $combo.textContent = state.combo;
+  }
+
+  function spawnTarget() {
+    const free = state.windows.filter(w => !state.targets.some(t => t.win === w && !t.hit));
+    if (free.length === 0) return;
+    const win = free[(Math.random() * free.length) | 0];
+    const difficulty = Math.min(1, state.elapsed / 50);
+    const fukuChance = 0.10 + difficulty * 0.10;
+    const blueChance = 0.18 + difficulty * 0.14;
+    const r = Math.random();
+    let type;
+    if (r < fukuChance) type = 'fuku';
+    else if (r < fukuChance + blueChance) type = 'oniBlue';
+    else type = 'oniRed';
+    const baseLife = 1.7 - difficulty * 0.7;
+    state.targets.push({
+      win, type, t: 0,
+      life: Math.max(0.85, baseLife + (type === 'oniBlue' ? -0.18 : 0) + (type === 'fuku' ? 0.4 : 0)),
+      hit: false, hideT: 0,
+    });
+  }
+
+  let pointer = null;
+  function onDown(x, y) {
+    if (!state.running) return;
+    const now = performance.now();
+    pointer = { sx: x, sy: y, history: [{ x, y, t: now }] };
+    state.trail = [{ x, y }];
+  }
+  function onMove(x, y) {
+    if (!state.running || !pointer) return;
+    const now = performance.now();
+    pointer.history.push({ x, y, t: now });
+    while (pointer.history.length > 1 && now - pointer.history[0].t > 140) pointer.history.shift();
+    state.trail.push({ x, y });
+    if (state.trail.length > 20) state.trail.shift();
+  }
+  function onUp(x, y) {
+    if (!state.running || !pointer) { state.trail = []; pointer = null; return; }
+    const now = performance.now();
+    pointer.history.push({ x, y, t: now });
+    while (pointer.history.length > 1 && now - pointer.history[0].t > 160) pointer.history.shift();
+    let vx = 0, vy = 0;
+    const hist = pointer.history;
+    if (hist.length >= 2) {
+      const a = hist[0];
+      const b = hist[hist.length - 1];
+      const dt = Math.max(0.016, (b.t - a.t) / 1000);
+      vx = (b.x - a.x) / dt;
+      vy = (b.y - a.y) / dt;
+    }
+    const mag = Math.hypot(vx, vy);
+    const minMag = 180;
+    const maxMag = 2600;
+    if (mag > minMag) {
+      const m = Math.min(maxMag, mag);
+      const k = (m / mag) * 0.72;
+      state.beans.push({
+        x: pointer.sx, y: pointer.sy,
+        vx: vx * k, vy: vy * k,
+        age: 0, spin: Math.random() * Math.PI * 2, dead: false,
+      });
+      for (let i = 0; i < 5; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const sp = 60 + Math.random() * 80;
+        state.particles.push({
+          x: pointer.sx, y: pointer.sy,
+          vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+          life: 0.35, age: 0, r: 2 + Math.random() * 1.5, c: 'rgba(255,220,170,0.65)', g: 80,
+        });
+      }
+    }
+    pointer = null;
+    state.trail = [];
+  }
+
+  function evtPos(e) {
+    const t = e.touches && e.touches[0] ? e.touches[0] : (e.changedTouches && e.changedTouches[0] ? e.changedTouches[0] : e);
+    return { x: t.clientX, y: t.clientY };
+  }
+  cvs.addEventListener('touchstart', e => { e.preventDefault(); const p = evtPos(e); onDown(p.x, p.y); }, { passive: false });
+  cvs.addEventListener('touchmove',  e => { e.preventDefault(); const p = evtPos(e); onMove(p.x, p.y); }, { passive: false });
+  cvs.addEventListener('touchend',   e => { e.preventDefault(); const p = evtPos(e); onUp(p.x, p.y); }, { passive: false });
+  cvs.addEventListener('touchcancel',e => { e.preventDefault(); pointer = null; state.trail = []; }, { passive: false });
+  cvs.addEventListener('mousedown', e => { onDown(e.clientX, e.clientY); });
+  cvs.addEventListener('mousemove', e => { if (pointer) onMove(e.clientX, e.clientY); });
+  cvs.addEventListener('mouseup',   e => { onUp(e.clientX, e.clientY); });
+
+  function vibrate(ms) { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} }
+
+  function targetVisualY(t) {
+    const w = t.win;
+    const phase = t.t / t.life;
+    let yOff = 0;
+    if (t.hit) yOff = 30 * (t.hideT / 0.4);
+    else if (phase < 0.18) yOff = (1 - phase / 0.18) * (w.h * 0.45);
+    else if (phase > 0.82) yOff = ((phase - 0.82) / 0.18) * (w.h * 0.45);
+    return w.y + yOff;
+  }
+
+  let last = performance.now();
+  function frame() {
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+
+    if (state.running) {
+      state.time -= dt;
+      state.elapsed += dt;
+      if (state.time <= 0) { state.time = 0; endGame(); }
+
+      state.lastSpawn += dt;
+      const rate = Math.max(0.28, 0.78 - state.elapsed * 0.009);
+      if (state.lastSpawn > rate) {
+        state.lastSpawn = 0;
+        spawnTarget();
+        if (Math.random() < 0.12 + Math.min(0.28, state.elapsed * 0.006)) spawnTarget();
+      }
+    }
+
+    for (const t of state.targets) {
+      t.t += dt;
+      if (t.hit) t.hideT += dt;
+    }
+    state.targets = state.targets.filter(t => {
+      if (t.hit) return t.hideT < 0.4;
+      if (t.t > t.life) {
+        if (t.type !== 'fuku') {
+          state.combo = 1;
+          state.misses++;
+          updateHud();
+        }
+        return false;
+      }
+      return true;
+    });
+
+    for (const b of state.beans) {
+      b.vy += 1100 * dt;
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      b.age += dt;
+      b.spin += dt * 14;
+      if (Math.random() < 0.7) {
+        state.particles.push({
+          x: b.x, y: b.y,
+          vx: -b.vx * 0.025 + (Math.random() - 0.5) * 30,
+          vy: -b.vy * 0.025 + (Math.random() - 0.5) * 30,
+          life: 0.35, age: 0, r: 1.6 + Math.random() * 1.2, c: 'rgba(255,225,170,0.65)', g: 60,
+        });
+      }
+      for (const t of state.targets) {
+        if (t.hit) continue;
+        const w = t.win;
+        const tx = w.x;
+        const ty = targetVisualY(t);
+        const dx = b.x - tx;
+        const dy = b.y - ty;
+        const hitR = (t.type === 'fuku' ? 30 : 26);
+        if (Math.hypot(dx, dy) < hitR) {
+          t.hit = true;
+          t.hideT = 0;
+          if (t.type === 'fuku') {
+            state.score = Math.max(0, state.score - 80);
+            state.combo = 1;
+            burst(tx, ty, '#ffd25e', 14);
+            showFloater(tx, ty, '−80', '#ffd25e');
+            vibrate(70);
+          } else {
+            const base = t.type === 'oniBlue' ? 200 : 100;
+            const speedBonus = Math.min(60, Math.floor(Math.hypot(b.vx, b.vy) * 0.04));
+            const pts = (base + speedBonus) * state.combo;
+            state.score += pts;
+            state.combo = Math.min(99, state.combo + 1);
+            state.maxCombo = Math.max(state.maxCombo, state.combo);
+            state.hits++;
+            const color = t.type === 'oniBlue' ? '#7ad9ff' : '#ff8166';
+            burst(tx, ty, color, 18);
+            burst(tx, ty, '#fff4d0', 10);
+            vibrate(25);
+            showFloater(tx, ty, '+' + pts, color);
+          }
+          updateHud();
+          b.dead = true;
+          break;
+        }
+      }
+      if (b.y > H + 60 || b.x < -80 || b.x > W + 80) b.dead = true;
+    }
+    state.beans = state.beans.filter(b => !b.dead);
+
+    for (const p of state.particles) {
+      p.age += dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      if (!p.ring) {
+        p.vy += (p.g || 200) * dt;
+        p.vx *= 0.985;
+      }
+    }
+    state.particles = state.particles.filter(p => p.age < p.life);
+
+    for (const f of state.floating) f.ph += dt * f.s;
+    for (const fl of state.floaters) fl.age += dt;
+    state.floaters = state.floaters.filter(f => f.age < f.life);
+
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  function showFloater(x, y, txt, color) {
+    state.floaters.push({ x, y, txt, color, age: 0, life: 0.9 });
+  }
+
+  function burst(x, y, color, n) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = 80 + Math.random() * 240;
+      state.particles.push({
+        x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+        life: 0.55 + Math.random() * 0.45, age: 0,
+        r: 2 + Math.random() * 2.5, c: color, g: 300,
+      });
+    }
+    state.particles.push({ x, y, vx: 0, vy: 0, life: 0.45, age: 0, ring: true, r: 10, c: color });
+  }
+
+  function draw() {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#1d0824');
+    g.addColorStop(0.55, '#180a26');
+    g.addColorStop(1, '#080310');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,238,210,0.92)';
+    ctx.shadowColor = 'rgba(255,220,160,0.55)';
+    ctx.shadowBlur = 28;
+    ctx.beginPath();
+    ctx.arc(W * 0.78, H * 0.10, 30, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    for (const f of state.floating) {
+      const fx = f.x + Math.sin(f.ph) * 14;
+      const fy = f.y + Math.cos(f.ph * 0.6) * 6;
+      ctx.fillStyle = 'rgba(255,150,100,0.16)';
+      ctx.beginPath(); ctx.arc(fx, fy, f.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,200,140,0.55)';
+      ctx.beginPath(); ctx.arc(fx, fy, f.r * 0.5, 0, Math.PI * 2); ctx.fill();
+    }
+
+    drawHouse();
+
+    for (const t of state.targets) drawTarget(t);
+
+    for (const b of state.beans) {
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.rotate(b.spin);
+      ctx.fillStyle = '#fff1c5';
+      ctx.beginPath(); ctx.ellipse(0, 0, 7, 4.5, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.beginPath(); ctx.ellipse(-1, 0, 5, 1.3, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+
+    for (const p of state.particles) {
+      const a = 1 - p.age / p.life;
+      if (p.ring) {
+        ctx.strokeStyle = p.c;
+        ctx.globalAlpha = a * 0.85;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r + (1 - a) * 40, 0, Math.PI * 2);
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = p.c;
+        ctx.globalAlpha = a;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    if (state.trail.length > 1) {
+      ctx.strokeStyle = 'rgba(255,220,170,0.42)';
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(state.trail[0].x, state.trail[0].y);
+      for (let i = 1; i < state.trail.length; i++) ctx.lineTo(state.trail[i].x, state.trail[i].y);
+      ctx.stroke();
+    }
+
+    for (const fl of state.floaters) {
+      const a = 1 - fl.age / fl.life;
+      ctx.fillStyle = fl.color;
+      ctx.globalAlpha = a;
+      ctx.font = 'bold 18px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(fl.txt, fl.x, fl.y - 28 - (1 - a) * 34);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function drawHouse() {
+    const cx = W * 0.5;
+    const houseTopY = H * 0.20;
+    const houseBotY = H * 0.58;
+    const houseW = Math.min(W * 0.86, 480);
+    const left = cx - houseW / 2;
+    const right = cx + houseW / 2;
+    ctx.fillStyle = '#2a1418';
+    ctx.beginPath();
+    ctx.moveTo(left - 18, houseTopY + 88);
+    ctx.lineTo(cx, houseTopY);
+    ctx.lineTo(right + 18, houseTopY + 88);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#4a2228';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    const bodyY = houseTopY + 88;
+    const bodyH = houseBotY - bodyY;
+    ctx.fillStyle = '#1c0c10';
+    ctx.fillRect(left, bodyY, houseW, bodyH);
+    ctx.strokeStyle = '#3a1e22';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(left, bodyY, houseW, bodyH);
+    ctx.strokeStyle = 'rgba(80,40,40,0.6)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, houseBotY);
+    ctx.lineTo(W, houseBotY);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(40,18,22,0.7)';
+    ctx.fillRect(0, houseBotY, W, H - houseBotY);
+    for (const w of state.windows) {
+      const inset = 2;
+      ctx.fillStyle = '#0a0508';
+      ctx.fillRect(w.x - w.w / 2, w.y - w.h / 2, w.w, w.h);
+      ctx.strokeStyle = '#5a2a30';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(w.x - w.w / 2 + inset, w.y - w.h / 2 + inset, w.w - inset * 2, w.h - inset * 2);
+      ctx.beginPath();
+      ctx.moveTo(w.x, w.y - w.h / 2 + inset);
+      ctx.lineTo(w.x, w.y + w.h / 2 - inset);
+      ctx.moveTo(w.x - w.w / 2 + inset, w.y);
+      ctx.lineTo(w.x + w.w / 2 - inset, w.y);
+      ctx.stroke();
+    }
+  }
+
+  function drawTarget(t) {
+    const w = t.win;
+    const phase = t.t / t.life;
+    let yOff = 0, scale = 1;
+    if (t.hit) {
+      const k = t.hideT / 0.4;
+      yOff = 28 * k;
+      scale = 1 - k * 0.5;
+    } else if (phase < 0.18) {
+      const k = phase / 0.18;
+      yOff = (1 - k) * (w.h * 0.45);
+      scale = 0.65 + k * 0.35;
+    } else if (phase > 0.82) {
+      const k = (phase - 0.82) / 0.18;
+      yOff = k * (w.h * 0.45);
+      scale = 1 - k * 0.4;
+    }
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(w.x - w.w / 2 + 3, w.y - w.h / 2 + 3, w.w - 6, w.h - 6);
+    ctx.clip();
+    const tx = w.x;
+    const ty = w.y + yOff;
+    if (t.type === 'fuku') {
+      drawFuku(tx, ty, scale);
+    } else if (t.type === 'oniBlue') {
+      drawOni(tx, ty, scale, '#5fa8d8', '#a5d4ec');
+    } else {
+      drawOni(tx, ty, scale, '#c84030', '#e88a76');
+    }
+    ctx.restore();
+  }
+
+  function drawOni(x, y, s, color, hl) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(s, s);
+    ctx.fillStyle = '#fff0c0';
+    ctx.beginPath();
+    ctx.moveTo(-10, -22); ctx.lineTo(-6, -32); ctx.lineTo(-2, -22); ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(10, -22); ctx.lineTo(6, -32); ctx.lineTo(2, -22); ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.arc(0, 0, 22, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#1a0a0a';
+    ctx.beginPath(); ctx.arc(0, -10, 22, Math.PI, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = hl;
+    ctx.globalAlpha = 0.45;
+    ctx.beginPath(); ctx.arc(-9, -4, 6, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(-7, 2, 4, 0, Math.PI * 2);
+    ctx.arc(7, 2, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.arc(-6, 3, 2, 0, Math.PI * 2);
+    ctx.arc(8, 3, 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#1a0a0a';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(-12, -4); ctx.lineTo(-3, -1);
+    ctx.moveTo(12, -4);  ctx.lineTo(3, -1);
+    ctx.stroke();
+    ctx.fillStyle = '#3a0a0a';
+    ctx.beginPath(); ctx.ellipse(0, 12, 8, 4, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.moveTo(-5, 10); ctx.lineTo(-3, 16); ctx.lineTo(-1, 10); ctx.closePath();
+    ctx.moveTo(5, 10);  ctx.lineTo(3, 16);  ctx.lineTo(1, 10);  ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawFuku(x, y, s) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(s, s);
+    ctx.fillStyle = 'rgba(255,210,94,0.28)';
+    ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fce9c0';
+    ctx.beginPath(); ctx.arc(0, 2, 22, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#1a0a0a';
+    ctx.beginPath(); ctx.arc(0, -6, 22, Math.PI, Math.PI * 2); ctx.fill();
+    ctx.fillRect(-22, -8, 6, 14);
+    ctx.fillRect(16, -8, 6, 14);
+    ctx.fillStyle = '#f4b0a0';
+    ctx.beginPath();
+    ctx.arc(-10, 8, 5, 0, Math.PI * 2);
+    ctx.arc(10, 8, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#1a0a0a';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(-7, 2, 4, Math.PI * 0.1, Math.PI * 0.9, false);
+    ctx.arc(7, 2, 4, Math.PI * 0.1, Math.PI * 0.9, false);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(0, 12, 4, 0, Math.PI, false);
+    ctx.stroke();
+    ctx.fillStyle = '#ffd25e';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('福', 0, -22);
+    ctx.restore();
+  }
+
+  function endGame() {
+    state.running = false;
+    $endScore.textContent = state.score;
+    let rank = '節分の夜は穏やかに';
+    if (state.score >= 6000) rank = '鬼神も逃げ出す投擲';
+    else if (state.score >= 3500) rank = '見事な豆まきでした';
+    else if (state.score >= 1800) rank = '福多き宵となりました';
+    else if (state.score >= 800)  rank = 'まずまずの一夜';
+    $endRank.textContent = rank;
+    $endStats.textContent = `命中 ${state.hits}　最大コンボ ×${state.maxCombo}`;
+    $end.classList.remove('hidden');
+  }
+
+  $startBtn.addEventListener('click', () => { $title.classList.add('hidden'); reset(); });
+  $againBtn.addEventListener('click', () => { $end.classList.add('hidden'); reset(); });
+
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
