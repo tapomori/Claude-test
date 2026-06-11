@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#040814">
+<title>Hotaru-gari ・ 蛍狩り</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #040814;
+    color: #d8e4ff;
+    font-family: -apple-system, "Hiragino Sans", "Yu Gothic UI", sans-serif;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #stage {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    background:
+      radial-gradient(ellipse at 50% 110%, rgba(40, 70, 110, 0.35), transparent 65%),
+      radial-gradient(ellipse at 30% 0%, rgba(20, 30, 60, 0.6), transparent 70%),
+      linear-gradient(180deg, #050a18 0%, #07111f 50%, #03060f 100%);
+  }
+  canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  #hud {
+    position: absolute;
+    top: env(safe-area-inset-top, 0);
+    left: 0; right: 0;
+    padding: 12px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    pointer-events: none;
+    font-feature-settings: "tnum";
+    text-shadow: 0 0 8px rgba(0,0,0,0.6);
+  }
+  .hud-block { font-size: 13px; letter-spacing: 0.08em; opacity: 0.9; }
+  .hud-num { font-size: 22px; font-weight: 600; letter-spacing: 0.04em; }
+  .hud-life { color: #ff8db8; }
+  #combo {
+    position: absolute;
+    left: 0; right: 0;
+    top: 30%;
+    text-align: center;
+    pointer-events: none;
+    font-size: 42px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    opacity: 0;
+    color: #ffe27a;
+    text-shadow: 0 0 24px #ffb84d, 0 0 4px #fff;
+    transition: opacity 0.3s, transform 0.3s;
+    transform: translateY(0);
+  }
+  #combo.show { opacity: 1; transform: translateY(-10px); }
+  #back {
+    position: absolute;
+    top: env(safe-area-inset-top, 12px);
+    right: 14px;
+    color: #aab5d0;
+    text-decoration: none;
+    font-size: 13px;
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: rgba(20,30,60,0.5);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    z-index: 5;
+  }
+  #lantern {
+    position: absolute;
+    bottom: calc(env(safe-area-inset-bottom, 0) + 14px);
+    left: 50%;
+    transform: translateX(-50%);
+    width: 64px;
+    height: 80px;
+    pointer-events: none;
+  }
+  #overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(ellipse at center, rgba(8,14,28,0.7), rgba(4,8,20,0.95));
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+    text-align: center;
+    padding: 24px;
+    z-index: 4;
+    transition: opacity 0.4s;
+  }
+  #overlay.hide { opacity: 0; pointer-events: none; }
+  #overlay h1 {
+    font-size: 32px;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    color: #ffe999;
+    text-shadow: 0 0 18px #f7c34c, 0 0 4px #fff;
+    margin-bottom: 6px;
+  }
+  #overlay .sub {
+    font-size: 13px;
+    color: #aeb9d8;
+    letter-spacing: 0.1em;
+    margin-bottom: 28px;
+  }
+  #overlay .tip {
+    font-size: 14px;
+    color: #cdd5ee;
+    line-height: 1.8;
+    margin-bottom: 28px;
+    max-width: 280px;
+  }
+  #overlay .tip b { color: #ffe27a; font-weight: 500; }
+  #start {
+    appearance: none;
+    -webkit-appearance: none;
+    border: 1px solid rgba(255, 220, 130, 0.5);
+    background: linear-gradient(180deg, rgba(255,200,90,0.18), rgba(255,140,60,0.12));
+    color: #fff5d8;
+    padding: 14px 32px;
+    font-size: 15px;
+    letter-spacing: 0.2em;
+    border-radius: 999px;
+    box-shadow: 0 0 24px rgba(255, 180, 60, 0.25);
+    cursor: pointer;
+  }
+  #start:active { transform: scale(0.97); }
+  #result-stats { display: none; margin-bottom: 22px; }
+  #result-stats div { font-size: 14px; color: #cdd5ee; margin: 4px 0; letter-spacing: 0.08em; }
+  #result-stats .big { font-size: 36px; font-weight: 700; color: #ffe27a; margin-top: 4px;
+                      text-shadow: 0 0 18px #f7c34c; letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <canvas id="bg"></canvas>
+    <canvas id="game"></canvas>
+    <canvas id="lantern"></canvas>
+  </div>
+
+  <div id="hud">
+    <div class="hud-block">
+      <div>SCORE</div>
+      <div class="hud-num" id="score">0</div>
+    </div>
+    <div class="hud-block" style="text-align:center;">
+      <div>TIME</div>
+      <div class="hud-num" id="time">60</div>
+    </div>
+    <div class="hud-block hud-life" style="text-align:right;">
+      <div>LIFE</div>
+      <div class="hud-num" id="life">♥♥♥</div>
+    </div>
+  </div>
+  <div id="combo"></div>
+  <a id="back" href="../../index.html">← 戻る</a>
+
+  <div id="overlay">
+    <h1>蛍狩り</h1>
+    <div class="sub">HOTARU - GARI</div>
+    <div class="tip" id="tip">
+      闇に <b>ふっ</b> と灯る蛍を、<br>
+      光った一瞬にタップして捕まえる。<br>
+      <br>
+      三度脈打つ蛍は次の発光を読めば<br>
+      <b>×3 連</b> の高得点。<br>
+      コウモリには触れないこと。
+    </div>
+    <div id="result-stats"></div>
+    <button id="start">は じ め る</button>
+  </div>
+
+<script>
+(() => {
+  'use strict';
+
+  const bgCanvas = document.getElementById('bg');
+  const gameCanvas = document.getElementById('game');
+  const lanternCanvas = document.getElementById('lantern');
+  const bgCtx = bgCanvas.getContext('2d');
+  const ctx = gameCanvas.getContext('2d');
+  const lctx = lanternCanvas.getContext('2d');
+
+  const scoreEl = document.getElementById('score');
+  const timeEl = document.getElementById('time');
+  const lifeEl = document.getElementById('life');
+  const comboEl = document.getElementById('combo');
+  const overlay = document.getElementById('overlay');
+  const startBtn = document.getElementById('start');
+  const tipEl = document.getElementById('tip');
+  const resultStats = document.getElementById('result-stats');
+
+  let W = 0, H = 0, DPR = 1;
+  let stars = [];
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2.5);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    [bgCanvas, gameCanvas].forEach(c => {
+      c.width = W * DPR;
+      c.height = H * DPR;
+      c.style.width = W + 'px';
+      c.style.height = H + 'px';
+    });
+    lanternCanvas.width = 64 * DPR;
+    lanternCanvas.height = 80 * DPR;
+    bgCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    lctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    drawBg();
+    drawLantern();
+  }
+
+  function drawBg() {
+    bgCtx.clearRect(0, 0, W, H);
+    // distant tree silhouettes
+    for (let layer = 0; layer < 3; layer++) {
+      const ly = H * (0.55 + layer * 0.13);
+      const tone = 8 + layer * 6;
+      bgCtx.fillStyle = `rgb(${tone}, ${tone+4}, ${tone+12})`;
+      bgCtx.beginPath();
+      bgCtx.moveTo(0, ly);
+      const seg = 30;
+      for (let x = 0; x <= W; x += seg) {
+        const n = Math.sin(x * 0.013 + layer * 5.3) * 0.5 + Math.sin(x * 0.04 + layer * 1.7) * 0.3;
+        bgCtx.lineTo(x, ly + n * (30 + layer * 6));
+      }
+      bgCtx.lineTo(W, H);
+      bgCtx.lineTo(0, H);
+      bgCtx.closePath();
+      bgCtx.fill();
+    }
+    // static stars
+    if (stars.length === 0) {
+      for (let i = 0; i < 50; i++) {
+        stars.push({
+          x: Math.random() * W,
+          y: Math.random() * H * 0.55,
+          r: Math.random() * 0.9 + 0.2,
+          a: Math.random() * 0.6 + 0.2
+        });
+      }
+    }
+    for (const s of stars) {
+      bgCtx.fillStyle = `rgba(200, 220, 255, ${s.a})`;
+      bgCtx.beginPath();
+      bgCtx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      bgCtx.fill();
+    }
+  }
+
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', () => setTimeout(resize, 100));
+
+  // ============ Game State ============
+  const STATE = {
+    INTRO: 0,
+    PLAY: 1,
+    OVER: 2
+  };
+  let state = STATE.INTRO;
+
+  const game = {
+    score: 0,
+    life: 3,
+    time: 60,
+    combo: 0,
+    caught: 0,
+    fireflies: [],
+    bats: [],
+    particles: [],
+    ripples: [],
+    spawnTimer: 0,
+    batTimer: 5,
+    startTime: 0,
+    lastTime: 0
+  };
+
+  function reset() {
+    game.score = 0;
+    game.life = 3;
+    game.time = 60;
+    game.combo = 0;
+    game.caught = 0;
+    game.fireflies = [];
+    game.bats = [];
+    game.particles = [];
+    game.ripples = [];
+    game.spawnTimer = 0.4;
+    game.batTimer = 6;
+    game.startTime = performance.now();
+    game.lastTime = performance.now();
+    updateHUD();
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = game.score;
+    timeEl.textContent = Math.max(0, Math.ceil(game.time));
+    lifeEl.textContent = '♥'.repeat(Math.max(0, game.life)) + '♡'.repeat(Math.max(0, 3 - game.life));
+  }
+
+  function vibrate(ms) {
+    if (navigator.vibrate) navigator.vibrate(ms);
+  }
+
+  // ============ Firefly ============
+  // life cycle: dim -> rising -> glow (catch window) -> fade -> gone
+  // Rhythm fireflies blink dim->bright 3 times then a longer glow.
+
+  function spawnFirefly() {
+    const margin = 50;
+    const isRhythm = Math.random() < 0.28 && game.time < 55;
+    const baseR = 14 + Math.random() * 6;
+    const ff = {
+      x: margin + Math.random() * (W - margin * 2),
+      y: margin + 60 + Math.random() * (H - 200),
+      vx: (Math.random() - 0.5) * 12,
+      vy: (Math.random() - 0.5) * 12,
+      r: baseR,
+      hue: 50 + Math.random() * 20,
+      t: 0,
+      phase: 'rise',
+      isRhythm,
+      blinkCount: 0,
+      // timings
+      riseDur: 0.45 + Math.random() * 0.25,
+      glowDur: isRhythm ? 0.85 : (0.55 + Math.random() * 0.35),
+      fadeDur: 0.4,
+      // for rhythm previewing
+      blinkInterval: 0.32,
+      maxBlinks: 3,
+      alive: true,
+      caught: false,
+      driftAngle: Math.random() * Math.PI * 2
+    };
+    game.fireflies.push(ff);
+  }
+
+  function spawnBat() {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const startX = side < 0 ? -80 : W + 80;
+    const speed = 220 + Math.random() * 140;
+    game.bats.push({
+      x: startX,
+      y: 100 + Math.random() * (H - 250),
+      vx: -side * speed,
+      vy: (Math.random() - 0.5) * 60,
+      r: 22,
+      flap: Math.random() * Math.PI * 2,
+      alive: true,
+      warned: false
+    });
+  }
+
+  function updateFirefly(ff, dt) {
+    ff.t += dt;
+
+    // drift
+    ff.driftAngle += dt * 0.6;
+    ff.x += ff.vx * dt + Math.sin(ff.driftAngle) * 6 * dt;
+    ff.y += ff.vy * dt + Math.cos(ff.driftAngle * 1.3) * 4 * dt;
+
+    // keep inside
+    if (ff.x < 30) ff.vx += 30 * dt;
+    if (ff.x > W - 30) ff.vx -= 30 * dt;
+    if (ff.y < 80) ff.vy += 30 * dt;
+    if (ff.y > H - 100) ff.vy -= 30 * dt;
+    ff.vx *= 0.99;
+    ff.vy *= 0.99;
+
+    if (ff.isRhythm) {
+      // rhythm cycle: blink-dark-blink-dark-blink-dark- glow -fade
+      const interval = ff.blinkInterval;
+      const previewDur = interval * ff.maxBlinks * 2; // each blink uses interval(on)+interval(off)
+      if (ff.phase === 'rise') {
+        if (ff.t < previewDur) {
+          // do nothing here, render will draw blink preview
+        } else {
+          ff.phase = 'glow';
+          ff.t = 0;
+        }
+      } else if (ff.phase === 'glow') {
+        if (ff.t > ff.glowDur) { ff.phase = 'fade'; ff.t = 0; }
+      } else if (ff.phase === 'fade') {
+        if (ff.t > ff.fadeDur) { ff.alive = false; if (!ff.caught) onMissed(ff); }
+      }
+    } else {
+      if (ff.phase === 'rise') {
+        if (ff.t > ff.riseDur) { ff.phase = 'glow'; ff.t = 0; }
+      } else if (ff.phase === 'glow') {
+        if (ff.t > ff.glowDur) { ff.phase = 'fade'; ff.t = 0; }
+      } else if (ff.phase === 'fade') {
+        if (ff.t > ff.fadeDur) { ff.alive = false; if (!ff.caught) onMissed(ff); }
+      }
+    }
+  }
+
+  function onMissed(ff) {
+    // missed glow window: lose combo only
+    game.combo = 0;
+  }
+
+  function updateBat(bat, dt) {
+    bat.x += bat.vx * dt;
+    bat.y += bat.vy * dt;
+    bat.flap += dt * 14;
+    bat.vy += Math.sin(bat.flap * 0.5) * 2 * dt;
+    if (bat.x < -120 || bat.x > W + 120) bat.alive = false;
+  }
+
+  // ============ Particles ============
+  function emitParticles(x, y, n, color, life=0.7, speed=180) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = speed * (0.4 + Math.random() * 0.8);
+      game.particles.push({
+        x, y,
+        vx: Math.cos(a) * s,
+        vy: Math.sin(a) * s - 30,
+        life: life * (0.7 + Math.random() * 0.6),
+        max: life,
+        r: 1.5 + Math.random() * 2.5,
+        color
+      });
+    }
+  }
+
+  function updateParticles(dt) {
+    for (let i = game.particles.length - 1; i >= 0; i--) {
+      const p = game.particles[i];
+      p.life -= dt;
+      p.vy += 120 * dt;
+      p.vx *= 0.97;
+      p.vy *= 0.97;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      if (p.life <= 0) game.particles.splice(i, 1);
+    }
+  }
+
+  function updateRipples(dt) {
+    for (let i = game.ripples.length - 1; i >= 0; i--) {
+      const r = game.ripples[i];
+      r.t += dt;
+      if (r.t > r.dur) game.ripples.splice(i, 1);
+    }
+  }
+
+  // ============ Input ============
+  function tap(x, y) {
+    if (state !== STATE.PLAY) return;
+
+    // ripple visual
+    game.ripples.push({ x, y, t: 0, dur: 0.55, max: 70 });
+
+    // check bat first (penalty)
+    for (const bat of game.bats) {
+      if (!bat.alive) continue;
+      const dx = bat.x - x, dy = bat.y - y;
+      if (dx * dx + dy * dy < (bat.r + 18) * (bat.r + 18)) {
+        // tapped bat: lose life
+        bat.alive = false;
+        game.life--;
+        game.combo = 0;
+        emitParticles(bat.x, bat.y, 18, '#7a4a8a', 0.6, 220);
+        vibrate([0, 30, 40, 60]);
+        if (game.life <= 0) gameOver();
+        updateHUD();
+        return;
+      }
+    }
+
+    // fireflies
+    let best = null, bestDist = Infinity;
+    for (const ff of game.fireflies) {
+      if (!ff.alive || ff.caught) continue;
+      const dx = ff.x - x, dy = ff.y - y;
+      const d2 = dx * dx + dy * dy;
+      const touchR = ff.r + 24;
+      if (d2 < touchR * touchR && d2 < bestDist) {
+        bestDist = d2;
+        best = ff;
+      }
+    }
+
+    if (best) {
+      catchFirefly(best);
+    } else {
+      // missed tap - no penalty but break combo
+      game.combo = Math.max(0, game.combo - 1);
+    }
+  }
+
+  function catchFirefly(ff) {
+    // Score depends on phase
+    let base = 0;
+    let label = '';
+    if (ff.phase === 'glow') {
+      base = ff.isRhythm ? 30 : 15;
+      label = ff.isRhythm ? '＋' + base + ' 連' : '＋' + base;
+    } else if (ff.phase === 'rise') {
+      base = ff.isRhythm ? 8 : 5;
+      label = '＋' + base;
+    } else if (ff.phase === 'fade') {
+      base = ff.isRhythm ? 10 : 6;
+      label = '＋' + base;
+    }
+
+    ff.caught = true;
+    ff.alive = false;
+    game.caught++;
+    game.combo++;
+    const multi = 1 + Math.min(0.5, game.combo * 0.05);
+    const gained = Math.round(base * multi);
+    game.score += gained;
+
+    emitParticles(ff.x, ff.y, ff.isRhythm ? 18 : 12,
+      `hsla(${ff.hue}, 100%, 70%, 1)`, ff.isRhythm ? 0.9 : 0.7,
+      ff.isRhythm ? 240 : 180);
+
+    if (game.combo >= 3) {
+      showCombo(game.combo + ' れん  ＋' + gained);
+    }
+    vibrate(ff.isRhythm ? [0, 14, 20, 14] : 10);
+    drawLantern();
+    updateHUD();
+  }
+
+  let comboTimer = null;
+  function showCombo(text) {
+    comboEl.textContent = text;
+    comboEl.classList.add('show');
+    clearTimeout(comboTimer);
+    comboTimer = setTimeout(() => comboEl.classList.remove('show'), 700);
+  }
+
+  function pos(e) {
+    const t = e.touches ? e.touches[0] : e;
+    if (!t) return null;
+    return { x: t.clientX, y: t.clientY };
+  }
+
+  gameCanvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (state === STATE.PLAY) {
+      const p = pos(e);
+      if (p) tap(p.x, p.y);
+    }
+  }, { passive: false });
+
+  gameCanvas.addEventListener('mousedown', (e) => {
+    if (state === STATE.PLAY) {
+      const p = pos(e);
+      if (p) tap(p.x, p.y);
+    }
+  });
+
+  // ============ Game Loop ============
+  function gameLoop(now) {
+    const dt = Math.min(0.05, (now - game.lastTime) / 1000);
+    game.lastTime = now;
+
+    if (state === STATE.PLAY) {
+      game.time -= dt;
+      if (game.time <= 0) { game.time = 0; gameOver(true); }
+
+      // spawn fireflies
+      game.spawnTimer -= dt;
+      if (game.spawnTimer <= 0) {
+        spawnFirefly();
+        const factor = 1 - Math.min(0.5, (60 - game.time) / 120);
+        game.spawnTimer = (0.65 + Math.random() * 0.5) * factor;
+        // sometimes spawn two
+        if (game.time < 40 && Math.random() < 0.3) spawnFirefly();
+      }
+
+      // spawn bats
+      game.batTimer -= dt;
+      if (game.batTimer <= 0) {
+        spawnBat();
+        game.batTimer = 3.5 + Math.random() * 3;
+      }
+
+      for (const ff of game.fireflies) updateFirefly(ff, dt);
+      for (const bat of game.bats) updateBat(bat, dt);
+      game.fireflies = game.fireflies.filter(f => f.alive);
+      game.bats = game.bats.filter(b => b.alive);
+
+      updateParticles(dt);
+      updateRipples(dt);
+      updateHUD();
+    } else {
+      // keep updating particles for transition
+      updateParticles(dt);
+      updateRipples(dt);
+    }
+
+    render();
+    requestAnimationFrame(gameLoop);
+  }
+
+  function render() {
+    ctx.clearRect(0, 0, W, H);
+
+    // Bats first (behind glow)
+    for (const bat of game.bats) {
+      drawBat(bat);
+    }
+
+    // Fireflies
+    for (const ff of game.fireflies) {
+      drawFirefly(ff);
+    }
+
+    // Particles
+    for (const p of game.particles) {
+      const a = Math.max(0, p.life / p.max);
+      ctx.globalAlpha = a;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r * (0.5 + a), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
+    // Ripples
+    for (const r of game.ripples) {
+      const k = r.t / r.dur;
+      const rad = r.max * k;
+      ctx.globalAlpha = (1 - k) * 0.5;
+      ctx.strokeStyle = '#ffd87a';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(r.x, r.y, rad, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function drawFirefly(ff) {
+    // brightness based on phase
+    let bright = 0;
+    let coreR = ff.r;
+    let isBlinkOn = false;
+    if (ff.isRhythm && ff.phase === 'rise') {
+      // blink preview - 3 small blinks
+      const t = ff.t;
+      const interval = ff.blinkInterval;
+      const cycle = Math.floor(t / interval);
+      const within = (t / interval) - cycle;
+      if (cycle < ff.maxBlinks * 2 && cycle % 2 === 0 && within < 0.5) {
+        bright = 0.55;
+        isBlinkOn = true;
+      } else {
+        bright = 0.05;
+      }
+      coreR = ff.r * 0.7;
+    } else if (ff.phase === 'rise') {
+      const k = ff.t / ff.riseDur;
+      bright = k * 0.7;
+    } else if (ff.phase === 'glow') {
+      // pulse during glow
+      const k = Math.min(1, ff.t / 0.15);
+      bright = 1 * k + 0.05 * Math.sin(ff.t * 25);
+      bright = Math.max(0.85, Math.min(1.05, bright));
+      coreR = ff.r * (1 + 0.1 * Math.sin(ff.t * 20));
+    } else if (ff.phase === 'fade') {
+      const k = 1 - ff.t / ff.fadeDur;
+      bright = k * 0.65;
+    }
+
+    const hue = ff.hue;
+    const sat = 100;
+
+    // glow halo
+    const glowR = coreR * (3 + bright * 4);
+    const grad = ctx.createRadialGradient(ff.x, ff.y, 0, ff.x, ff.y, glowR);
+    grad.addColorStop(0, `hsla(${hue}, ${sat}%, 85%, ${0.85 * bright})`);
+    grad.addColorStop(0.4, `hsla(${hue}, ${sat}%, 65%, ${0.35 * bright})`);
+    grad.addColorStop(1, `hsla(${hue}, ${sat}%, 50%, 0)`);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(ff.x, ff.y, glowR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ring marker for rhythm firefly when glowing
+    if (ff.isRhythm && ff.phase === 'glow') {
+      ctx.strokeStyle = `hsla(${hue}, 100%, 80%, ${0.6 + 0.3 * Math.sin(ff.t * 18)})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(ff.x, ff.y, coreR + 8, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // core
+    ctx.fillStyle = `hsla(${hue}, 80%, 95%, ${Math.min(1, bright + 0.1)})`;
+    ctx.beginPath();
+    ctx.arc(ff.x, ff.y, coreR * (0.5 + bright * 0.6), 0, Math.PI * 2);
+    ctx.fill();
+
+    // tiny white center when bright
+    if (bright > 0.6) {
+      ctx.fillStyle = `rgba(255, 255, 255, ${(bright - 0.6) * 2.5})`;
+      ctx.beginPath();
+      ctx.arc(ff.x, ff.y, coreR * 0.35, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawBat(bat) {
+    const flap = Math.sin(bat.flap) * 0.4 + 0.6;
+    ctx.save();
+    ctx.translate(bat.x, bat.y);
+    if (bat.vx < 0) ctx.scale(-1, 1);
+
+    // wings
+    ctx.fillStyle = 'rgba(40, 20, 50, 0.92)';
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(-12, -20 * flap, -28, -4 * flap);
+    ctx.quadraticCurveTo(-18, 2, -10, 6);
+    ctx.lineTo(0, 4);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(12, -20 * flap, 28, -4 * flap);
+    ctx.quadraticCurveTo(18, 2, 10, 6);
+    ctx.lineTo(0, 4);
+    ctx.fill();
+
+    // body
+    ctx.fillStyle = '#221330';
+    ctx.beginPath();
+    ctx.ellipse(0, 2, 6, 9, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // eyes
+    ctx.fillStyle = '#ff5577';
+    ctx.beginPath();
+    ctx.arc(-2, -1, 1.4, 0, Math.PI * 2);
+    ctx.arc(2, -1, 1.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawLantern() {
+    const w = 64, h = 80;
+    lctx.clearRect(0, 0, w, h);
+    // jar shape
+    lctx.fillStyle = 'rgba(20, 30, 50, 0.5)';
+    lctx.strokeStyle = 'rgba(220, 230, 255, 0.4)';
+    lctx.lineWidth = 1.2;
+    lctx.beginPath();
+    lctx.moveTo(14, 18);
+    lctx.lineTo(50, 18);
+    lctx.lineTo(50, 22);
+    lctx.bezierCurveTo(60, 28, 60, 60, 50, 72);
+    lctx.lineTo(14, 72);
+    lctx.bezierCurveTo(4, 60, 4, 28, 14, 22);
+    lctx.closePath();
+    lctx.fill();
+    lctx.stroke();
+    // lid
+    lctx.fillStyle = 'rgba(140, 130, 110, 0.6)';
+    lctx.fillRect(18, 12, 28, 6);
+    lctx.fillRect(20, 8, 24, 4);
+
+    // dots representing collected
+    const max = 36;
+    const n = Math.min(max, game.caught);
+    for (let i = 0; i < n; i++) {
+      const a = i * 0.71;
+      const r = 4 + (i % 8) * 1.6;
+      const cx = 32 + Math.cos(a + i * 0.3) * r;
+      const cy = 50 + Math.sin(a + i * 0.5) * (r * 0.7);
+      const alpha = 0.6 + Math.random() * 0.4;
+      lctx.fillStyle = `hsla(${55 + (i % 5) * 5}, 100%, 75%, ${alpha})`;
+      lctx.beginPath();
+      lctx.arc(cx, cy, 1.6, 0, Math.PI * 2);
+      lctx.fill();
+    }
+
+    // overall glow
+    if (game.caught > 0) {
+      const gr = lctx.createRadialGradient(32, 50, 0, 32, 50, 28 + Math.min(15, game.caught * 0.5));
+      gr.addColorStop(0, `hsla(50, 100%, 75%, ${Math.min(0.5, game.caught * 0.02)})`);
+      gr.addColorStop(1, 'hsla(50, 100%, 50%, 0)');
+      lctx.fillStyle = gr;
+      lctx.beginPath();
+      lctx.arc(32, 50, 32, 0, Math.PI * 2);
+      lctx.fill();
+    }
+  }
+
+  // ============ Flow ============
+  function start() {
+    state = STATE.PLAY;
+    overlay.classList.add('hide');
+    reset();
+    drawLantern();
+  }
+
+  function gameOver(timeup) {
+    if (state !== STATE.PLAY) return;
+    state = STATE.OVER;
+    vibrate([0, 30, 80, 30]);
+
+    // result UI
+    resultStats.style.display = 'block';
+    tipEl.style.display = 'none';
+    const elapsed = ((performance.now() - game.startTime) / 1000).toFixed(0);
+    resultStats.innerHTML = `
+      <div>${timeup ? '夜が明けた' : '灯が落ちた'}</div>
+      <div class="big">${game.score}</div>
+      <div>蛍 ${game.caught} 匹</div>
+    `;
+    startBtn.textContent = 'も う い ち ど';
+    overlay.classList.remove('hide');
+  }
+
+  startBtn.addEventListener('click', () => {
+    tipEl.style.display = '';
+    resultStats.style.display = 'none';
+    start();
+  });
+
+  // ============ Boot ============
+  resize();
+  drawLantern();
+  requestAnimationFrame((t) => {
+    game.lastTime = t;
+    gameLoop(t);
+  });
+
+})();
+</script>
+</body>
+</html>
