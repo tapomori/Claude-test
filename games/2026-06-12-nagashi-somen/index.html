@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Nagashi Somen - 流しそうめん</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: #dceec9;
+    touch-action: manipulation;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    font-family: "Hiragino Maru Gothic ProN", "Hiragino Sans", "Yu Gothic", sans-serif;
+  }
+  #wrap { position: fixed; inset: 0; }
+  canvas { display: block; }
+
+  /* HUD */
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    padding: max(10px, env(safe-area-inset-top)) 14px 0;
+    pointer-events: none; z-index: 5;
+  }
+  .hudBox {
+    background: rgba(255,255,255,.72); border-radius: 14px;
+    padding: 6px 12px; color: #3d5226; font-weight: 700;
+    box-shadow: 0 2px 8px rgba(60,80,30,.15);
+  }
+  #score { font-size: 22px; min-width: 76px; text-align: center; }
+  #score small { display: block; font-size: 10px; font-weight: 600; opacity: .65; }
+  #timer { font-size: 20px; text-align: center; min-width: 60px; }
+  #timer small { display: block; font-size: 10px; font-weight: 600; opacity: .65; }
+  #lives { font-size: 18px; letter-spacing: 2px; padding: 8px 10px; }
+  #lives .lost { opacity: .18; filter: grayscale(1); }
+
+  #combo {
+    position: fixed; top: 17%; left: 50%; transform: translateX(-50%);
+    color: #c4731a; font-size: 22px; font-weight: 800;
+    text-shadow: 0 1px 0 #fff, 0 2px 10px rgba(255,255,255,.8);
+    opacity: 0; transition: opacity .25s; z-index: 5; pointer-events: none;
+  }
+  #combo.show { opacity: 1; }
+
+  #popup {
+    position: fixed; top: 56%; left: 50%;
+    color: #2e7d32; font-size: 30px; font-weight: 800;
+    text-shadow: 0 1px 0 #fff, 0 2px 12px rgba(255,255,255,.9);
+    opacity: 0; pointer-events: none; z-index: 5;
+    transform: translate(-50%, 0);
+  }
+  #popup.pop { animation: popUp .7s ease-out; }
+  @keyframes popUp {
+    0%   { opacity: 0; transform: translate(-50%, 8px) scale(.6); }
+    20%  { opacity: 1; transform: translate(-50%, -6px) scale(1.15); }
+    100% { opacity: 0; transform: translate(-50%, -46px) scale(1); }
+  }
+
+  #flash {
+    position: fixed; inset: 0; background: #e53935; opacity: 0;
+    pointer-events: none; z-index: 8;
+  }
+  #flash.on { animation: flashAnim .45s ease-out; }
+  @keyframes flashAnim { 0% { opacity: .45; } 100% { opacity: 0; } }
+
+  /* Overlays */
+  .overlay {
+    position: fixed; inset: 0; z-index: 10;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    background: rgba(235, 245, 220, .82);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    text-align: center; padding: 24px; color: #3d5226;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h1 { font-size: 42px; letter-spacing: 6px; margin-bottom: 6px; }
+  .overlay .sub { font-size: 14px; opacity: .75; margin-bottom: 26px; letter-spacing: 2px; }
+  .rule {
+    display: flex; align-items: center; gap: 12px;
+    background: rgba(255,255,255,.75); border-radius: 16px;
+    padding: 10px 18px; margin: 5px 0; font-size: 15px; font-weight: 700;
+    box-shadow: 0 2px 8px rgba(60,80,30,.12);
+  }
+  .rule .ic { font-size: 24px; }
+  #startBtn, #againBtn {
+    margin-top: 30px; border: none; cursor: pointer;
+    background: #6a9a3a; color: #fff; font-size: 20px; font-weight: 800;
+    padding: 16px 52px; border-radius: 999px; letter-spacing: 4px;
+    box-shadow: 0 6px 0 #4d7426, 0 8px 20px rgba(60,80,30,.3);
+    font-family: inherit; transition: transform .08s, box-shadow .08s;
+  }
+  #startBtn:active, #againBtn:active {
+    transform: translateY(4px); box-shadow: 0 2px 0 #4d7426;
+  }
+  #endTitle { font-size: 34px; letter-spacing: 4px; margin-bottom: 4px; }
+  #endStats {
+    background: rgba(255,255,255,.8); border-radius: 18px;
+    padding: 18px 34px; margin-top: 18px; line-height: 1.9; font-size: 16px; font-weight: 700;
+    box-shadow: 0 2px 10px rgba(60,80,30,.15);
+  }
+  #endStats .big { font-size: 38px; color: #c4731a; }
+  #endStats .best { font-size: 13px; opacity: .7; }
+  .backLink {
+    margin-top: 22px; font-size: 14px; color: #3d5226; opacity: .75;
+    text-decoration: underline; letter-spacing: 1px;
+  }
+  #err {
+    position: fixed; inset: 0; z-index: 20; display: none;
+    justify-content: center; align-items: center; text-align: center;
+    background: #dceec9; color: #3d5226; padding: 30px; font-size: 15px; line-height: 2;
+  }
+</style>
+</head>
+<body>
+<div id="wrap"></div>
+
+<div id="hud" style="display:none">
+  <div class="hudBox" id="score"><small>SCORE</small>0</div>
+  <div class="hudBox" id="timer"><small>TIME</small>60</div>
+  <div class="hudBox" id="lives"><span>🌶</span><span>🌶</span><span>🌶</span></div>
+</div>
+<div id="combo"></div>
+<div id="popup"></div>
+<div id="flash"></div>
+
+<div class="overlay" id="titleOv">
+  <h1>流しそうめん</h1>
+  <div class="sub">— NAGASHI SOMEN —</div>
+  <div class="rule"><span class="ic">🍜</span>手前に来たら タップで掴む</div>
+  <div class="rule"><span class="ic">🌶</span>唐辛子は 掴んじゃダメ</div>
+  <div class="rule"><span class="ic">✨</span>金そうめんは 3倍点</div>
+  <button id="startBtn">はじめる</button>
+  <a class="backLink" href="../../index.html">← ギャラリーへ戻る</a>
+</div>
+
+<div class="overlay hidden" id="endOv">
+  <div id="endTitle">ごちそうさま</div>
+  <div id="endStats">
+    <span class="big" id="endScore">0</span><br>
+    <span id="endCaught">そうめん 0束</span><br>
+    <span class="best" id="endBest">ベスト 0</span>
+  </div>
+  <button id="againBtn">もう一度</button>
+  <a class="backLink" href="../../index.html">← ギャラリーへ戻る</a>
+</div>
+
+<div id="err">この端末では3D表示を起動できませんでした。<br><a href="../../index.html">← ギャラリーへ戻る</a></div>
+
+<script type="module">
+import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+
+const $ = id => document.getElementById(id);
+const vibe = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch(e){} };
+
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+} catch(e) {
+  $('err').style.display = 'flex';
+  throw e;
+}
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+$('wrap').appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xdceec9);
+scene.fog = new THREE.Fog(0xdceec9, 16, 46);
+
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 80);
+camera.position.set(0, 2.4, 4.2);
+camera.lookAt(0, 1.7, -12);
+
+scene.add(new THREE.HemisphereLight(0xeaf6ff, 0x7a9a4f, 1.0));
+const sun = new THREE.DirectionalLight(0xfff2d0, 1.4);
+sun.position.set(-4, 8, 3);
+scene.add(sun);
+
+// ---- world group (tilted: far end of the flume is higher) ----
+const world = new THREE.Group();
+world.rotation.x = 0.10;
+scene.add(world);
+
+const FLUME_LEN = 52, FLUME_R = 1.1, CATCH_Z = -2.6, CATCH_TOL = 1.5;
+
+// bamboo half-pipe
+const flumeMat = new THREE.MeshStandardMaterial({
+  color: 0x9ab85e, roughness: .7, side: THREE.DoubleSide
+});
+const flume = new THREE.Mesh(
+  new THREE.CylinderGeometry(FLUME_R, FLUME_R, FLUME_LEN, 28, 1, true, Math.PI / 2, Math.PI),
+  flumeMat
+);
+flume.rotation.x = -Math.PI / 2;
+flume.position.z = -FLUME_LEN / 2 + 3;
+world.add(flume);
+
+// bamboo node rings (depth cues)
+const nodeGeo = new THREE.TorusGeometry(FLUME_R + 0.03, 0.06, 8, 28, Math.PI);
+const nodeMat = new THREE.MeshStandardMaterial({ color: 0x76913f, roughness: .7 });
+for (let z = -2; z > -FLUME_LEN + 4; z -= 6.5) {
+  const ring = new THREE.Mesh(nodeGeo, nodeMat);
+  ring.rotation.z = Math.PI; // lower half
+  ring.position.z = z;
+  world.add(ring);
+}
+
+// water surface + flowing streaks
+const water = new THREE.Mesh(
+  new THREE.PlaneGeometry(1.7, FLUME_LEN),
+  new THREE.MeshStandardMaterial({ color: 0xbfe9ff, transparent: true, opacity: .45, roughness: .2 })
+);
+water.rotation.x = -Math.PI / 2;
+water.position.set(0, -0.55, -FLUME_LEN / 2 + 3);
+world.add(water);
+
+const streaks = [];
+const streakMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .55 });
+for (let i = 0; i < 16; i++) {
+  const s = new THREE.Mesh(new THREE.PlaneGeometry(0.05, 1.1 + Math.random()), streakMat);
+  s.rotation.x = -Math.PI / 2;
+  s.position.set((Math.random() - .5) * 1.4, -0.52, -Math.random() * FLUME_LEN + 2);
+  world.add(s);
+  streaks.push(s);
+}
+
+// catch zone ring (pulsing)
+const ringMat = new THREE.MeshBasicMaterial({ color: 0xffc94d, transparent: true, opacity: .85 });
+const catchRing = new THREE.Mesh(new THREE.TorusGeometry(FLUME_R + 0.1, 0.05, 8, 40), ringMat);
+catchRing.position.z = CATCH_Z;
+world.add(catchRing);
+
+// chopsticks (hover above the catch zone, dive on tap)
+const sticks = new THREE.Group();
+const stickGeo = new THREE.CylinderGeometry(0.035, 0.05, 3.4, 8);
+stickGeo.translate(0, 1.7, 0); // pivot at tip
+const stickMat = new THREE.MeshStandardMaterial({ color: 0x8b5a2b, roughness: .6 });
+const stickL = new THREE.Mesh(stickGeo, stickMat);
+const stickR = new THREE.Mesh(stickGeo, stickMat);
+sticks.add(stickL, stickR);
+sticks.rotation.x = 0.5;            // lean back toward player
+const STICKS_REST_Y = 1.45, STICKS_DOWN_Y = -0.25;
+sticks.position.set(0, STICKS_REST_Y, CATCH_Z);
+world.add(sticks);
+let snapAnim = 0; // 0 = rest, runs 1 -> 0
+
+// scenery bamboo stalks
+const stalkGeo = new THREE.CylinderGeometry(0.22, 0.28, 16, 10);
+for (let i = 0; i < 14; i++) {
+  const m = new THREE.Mesh(stalkGeo, new THREE.MeshStandardMaterial({
+    color: new THREE.Color().setHSL(0.26, 0.42, 0.36 + Math.random() * 0.18), roughness: .8
+  }));
+  const side = i % 2 ? 1 : -1;
+  m.position.set(side * (2.6 + Math.random() * 2.6), 5, -5 - Math.random() * 36);
+  world.add(m);
+}
+
+// ---- item factories ----
+function makeSomen(gold) {
+  const g = new THREE.Group();
+  const col = gold ? 0xffd877 : 0xfffdf6;
+  const emi = gold ? 0xa07010 : 0x444440;
+  const mat = new THREE.MeshStandardMaterial({ color: col, emissive: emi, roughness: .35 });
+  const core = new THREE.Mesh(new THREE.SphereGeometry(0.26, 14, 10), mat);
+  core.scale.set(1, 0.55, 1.25);
+  g.add(core);
+  const strandGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.95, 6);
+  for (let i = 0; i < 7; i++) {
+    const s = new THREE.Mesh(strandGeo, mat);
+    s.rotation.x = Math.PI / 2 + (Math.random() - .5) * 0.5;
+    s.rotation.z = (Math.random() - .5) * 0.5;
+    s.position.set((Math.random() - .5) * 0.3, (Math.random()) * 0.12, (Math.random() - .5) * 0.3);
+    g.add(s);
+  }
+  return g;
+}
+function makeChili() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.16, 0.34, 6, 12),
+    new THREE.MeshStandardMaterial({ color: 0xe53935, emissive: 0x550000, roughness: .35 })
+  );
+  body.rotation.z = 1.2;
+  g.add(body);
+  const stem = new THREE.Mesh(
+    new THREE.ConeGeometry(0.09, 0.2, 8),
+    new THREE.MeshStandardMaterial({ color: 0x3f7d2c, roughness: .6 })
+  );
+  stem.position.set(-0.3, 0.16, 0);
+  stem.rotation.z = 0.9;
+  g.add(stem);
+  return g;
+}
+
+// ---- splash particles (pooled) ----
+const POOL = 50;
+const pGeo = new THREE.SphereGeometry(0.05, 6, 5);
+const particles = [];
+for (let i = 0; i < POOL; i++) {
+  const p = new THREE.Mesh(pGeo, new THREE.MeshBasicMaterial({ transparent: true }));
+  p.visible = false;
+  world.add(p);
+  particles.push({ mesh: p, vel: new THREE.Vector3(), life: 0 });
+}
+function splash(pos, color, n) {
+  let made = 0;
+  for (const p of particles) {
+    if (p.life > 0) continue;
+    p.mesh.material.color.set(color);
+    p.mesh.material.opacity = 1;
+    p.mesh.visible = true;
+    p.mesh.position.copy(pos);
+    p.vel.set((Math.random() - .5) * 3.2, Math.random() * 3 + 1.2, (Math.random() - .5) * 3.2);
+    p.life = 0.55;
+    if (++made >= n) break;
+  }
+}
+
+// ---- game state ----
+const DURATION = 60;
+let state = 'title';
+let items = [];          // {mesh, kind:'somen'|'gold'|'chili', phase, caught, catchT}
+let score, combo, caught, lives, timeLeft, elapsed, spawnTimer, snapCooldown;
+let best = +(localStorage.getItem('nagashi-somen-best') || 0);
+
+const hud = $('hud'), scoreEl = $('score'), timerEl = $('timer'),
+      livesEl = $('lives'), comboEl = $('combo'), popupEl = $('popup'), flashEl = $('flash');
+
+function setScore(v) { scoreEl.innerHTML = '<small>SCORE</small>' + v; }
+function setTimer(v) { timerEl.innerHTML = '<small>TIME</small>' + Math.ceil(v); }
+function setLives(v) {
+  livesEl.innerHTML = [0, 1, 2].map(i => `<span class="${i < v ? '' : 'lost'}">🌶</span>`).join('');
+}
+function showCombo() {
+  if (combo >= 2) { comboEl.textContent = combo + ' COMBO!'; comboEl.classList.add('show'); }
+  else comboEl.classList.remove('show');
+}
+function popScore(text, color) {
+  popupEl.textContent = text;
+  popupEl.style.color = color;
+  popupEl.classList.remove('pop');
+  void popupEl.offsetWidth;
+  popupEl.classList.add('pop');
+}
+
+function resetGame() {
+  for (const it of items) world.remove(it.mesh);
+  items = [];
+  score = 0; combo = 0; caught = 0; lives = 3;
+  timeLeft = DURATION; elapsed = 0; spawnTimer = 0.6; snapCooldown = 0;
+  setScore(0); setTimer(DURATION); setLives(3); showCombo();
+  hud.style.display = 'flex';
+}
+
+function spawnItem() {
+  const r = Math.random();
+  const kind = r < 0.16 ? 'chili' : r < 0.24 ? 'gold' : 'somen';
+  const mesh = kind === 'chili' ? makeChili() : makeSomen(kind === 'gold');
+  mesh.position.set((Math.random() - .5) * 0.9, -0.32, -46);
+  world.add(mesh);
+  items.push({ mesh, kind, phase: Math.random() * 6.28, caught: false, catchT: 0 });
+}
+
+function endGame(reason) {
+  state = 'over';
+  hud.style.display = 'none';
+  comboEl.classList.remove('show');
+  best = Math.max(best, score);
+  localStorage.setItem('nagashi-somen-best', best);
+  $('endTitle').textContent = reason === 'spicy' ? 'からい…！' : 'ごちそうさま';
+  $('endScore').textContent = score;
+  $('endCaught').textContent = `そうめん ${caught}束`;
+  $('endBest').textContent = `ベスト ${best}`;
+  setTimeout(() => $('endOv').classList.remove('hidden'), 500);
+}
+
+// ---- tap = snap chopsticks ----
+function snap() {
+  if (state !== 'play' || snapCooldown > 0) return;
+  snapCooldown = 0.22;
+  snapAnim = 1;
+
+  let target = null, bestD = CATCH_TOL;
+  for (const it of items) {
+    if (it.caught) continue;
+    const d = Math.abs(it.mesh.position.z - CATCH_Z);
+    if (d < bestD) { bestD = d; target = it; }
+  }
+
+  if (!target) {
+    splash(new THREE.Vector3(0, -0.4, CATCH_Z), 0xbfe9ff, 6);
+    vibe(8);
+    return;
+  }
+
+  if (target.kind === 'chili') {
+    target.caught = true; target.catchT = 0;
+    lives--; combo = 0;
+    setLives(lives); showCombo();
+    flashEl.classList.remove('on'); void flashEl.offsetWidth; flashEl.classList.add('on');
+    popScore('🌶 からい！', '#e53935');
+    splash(target.mesh.position.clone(), 0xe53935, 12);
+    vibe([60, 40, 60]);
+    if (lives <= 0) endGame('spicy');
+    return;
+  }
+
+  target.caught = true; target.catchT = 0;
+  combo++; caught++;
+  const base = 10 + (combo - 1) * 2;
+  const pts = target.kind === 'gold' ? base * 3 : base;
+  score += pts;
+  setScore(score); showCombo();
+  popScore('+' + pts, target.kind === 'gold' ? '#c4731a' : '#2e7d32');
+  splash(target.mesh.position.clone(), target.kind === 'gold' ? 0xffd877 : 0xffffff, 10);
+  vibe(target.kind === 'gold' ? [20, 30, 20] : 15);
+}
+
+window.addEventListener('pointerdown', e => {
+  if (e.target.closest('.overlay') || e.target.closest('a')) return;
+  snap();
+});
+$('startBtn').addEventListener('click', () => {
+  $('titleOv').classList.add('hidden');
+  resetGame();
+  state = 'play';
+});
+$('againBtn').addEventListener('click', () => {
+  $('endOv').classList.add('hidden');
+  resetGame();
+  state = 'play';
+});
+
+// ---- main loop ----
+const clock = new THREE.Clock();
+const camTarget = new THREE.Vector3();
+
+function tick() {
+  requestAnimationFrame(tick);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t = clock.elapsedTime;
+
+  // ambient motion (always)
+  catchRing.scale.setScalar(1 + Math.sin(t * 5) * 0.04);
+  ringMat.opacity = 0.65 + Math.sin(t * 5) * 0.25;
+  const flowSpeed = state === 'play' ? 6 + elapsed * 0.09 : 5;
+  for (const s of streaks) {
+    s.position.z += flowSpeed * 0.9 * dt;
+    if (s.position.z > 2) { s.position.z = -FLUME_LEN + 4; s.position.x = (Math.random() - .5) * 1.4; }
+  }
+
+  // chopsticks snap animation
+  if (snapAnim > 0) {
+    snapAnim = Math.max(0, snapAnim - dt / 0.22);
+    const k = Math.sin(snapAnim * Math.PI); // 0 -> 1 -> 0
+    sticks.position.y = STICKS_REST_Y + (STICKS_DOWN_Y - STICKS_REST_Y) * k;
+    stickL.rotation.z =  0.16 * (1 - k);
+    stickR.rotation.z = -0.16 * (1 - k);
+  } else {
+    sticks.position.y = STICKS_REST_Y + Math.sin(t * 2.2) * 0.05;
+    stickL.rotation.z = 0.16; stickR.rotation.z = -0.16;
+  }
+
+  // particles
+  for (const p of particles) {
+    if (p.life <= 0) continue;
+    p.life -= dt;
+    p.vel.y -= 9 * dt;
+    p.mesh.position.addScaledVector(p.vel, dt);
+    p.mesh.material.opacity = Math.max(0, p.life / 0.55);
+    if (p.life <= 0) p.mesh.visible = false;
+  }
+
+  if (state === 'play') {
+    elapsed += dt;
+    timeLeft -= dt;
+    snapCooldown = Math.max(0, snapCooldown - dt);
+    setTimer(Math.max(0, timeLeft));
+    if (timeLeft <= 0) { endGame('time'); }
+
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) {
+      spawnItem();
+      const base = Math.max(0.65, 1.5 - elapsed * 0.014);
+      spawnTimer = base * (0.8 + Math.random() * 0.4);
+    }
+
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i];
+      if (it.caught) {
+        // fly toward the player's bowl
+        it.catchT += dt;
+        const k = Math.min(1, it.catchT / 0.3);
+        it.mesh.position.lerp(new THREE.Vector3(0, 0.2, 2.6), 0.18);
+        it.mesh.scale.setScalar(1 - k * 0.85);
+        it.mesh.rotation.y += dt * 9;
+        if (k >= 1) { world.remove(it.mesh); items.splice(i, 1); }
+        continue;
+      }
+      it.mesh.position.z += flowSpeed * dt;
+      it.mesh.position.y = -0.32 + Math.sin(t * 4 + it.phase) * 0.045;
+      it.mesh.rotation.y = Math.sin(t * 2 + it.phase) * 0.35;
+      if (it.mesh.position.z > 1.5) {
+        if (it.kind !== 'chili' && combo > 0) { combo = 0; showCombo(); }
+        world.remove(it.mesh);
+        items.splice(i, 1);
+      }
+    }
+  }
+
+  // subtle camera sway
+  camera.position.x = Math.sin(t * 0.4) * 0.06;
+  camTarget.set(0, 1.7, -12);
+  camera.lookAt(camTarget);
+
+  renderer.render(scene, camera);
+}
+tick();
+
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
