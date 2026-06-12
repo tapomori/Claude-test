@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Take-tonbo (竹蜻蛉)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #07080d;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", sans-serif;
+    color: #e8eef7;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+    overscroll-behavior: none;
+  }
+  #stage {
+    position: fixed; inset: 0;
+    touch-action: none;
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+  .ui {
+    position: fixed;
+    left: 0; right: 0;
+    pointer-events: none;
+    z-index: 10;
+  }
+  #top {
+    top: env(safe-area-inset-top, 0);
+    padding: 14px 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    font-size: 14px;
+    letter-spacing: 0.08em;
+  }
+  #top .lbl { opacity: 0.55; font-size: 10px; letter-spacing: 0.18em; margin-bottom: 2px; }
+  #top .val { font-size: 22px; font-weight: 300; font-feature-settings: "tnum"; }
+  #top .val .unit { font-size: 11px; opacity: 0.6; margin-left: 3px; }
+
+  #back {
+    position: fixed;
+    top: env(safe-area-inset-top, 0);
+    right: 0;
+    margin: 12px 14px;
+    z-index: 20;
+    color: #cad3e2;
+    text-decoration: none;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    padding: 8px 12px;
+    background: rgba(20,26,40,0.55);
+    border: 1px solid rgba(220,230,255,0.15);
+    border-radius: 999px;
+    pointer-events: auto;
+    backdrop-filter: blur(6px);
+  }
+
+  #hint {
+    position: fixed;
+    left: 0; right: 0;
+    bottom: 18%;
+    text-align: center;
+    pointer-events: none;
+    z-index: 10;
+    opacity: 0;
+    transition: opacity 0.4s;
+  }
+  #hint .main {
+    font-size: 16px;
+    letter-spacing: 0.2em;
+    color: #f4ecd6;
+    text-shadow: 0 0 14px rgba(244,180,90,0.5);
+  }
+  #hint .sub {
+    margin-top: 6px;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    opacity: 0.55;
+  }
+  #hint.show { opacity: 1; }
+
+  #gauge {
+    position: fixed;
+    left: 10%; right: 10%;
+    bottom: 10%;
+    height: 6px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 999px;
+    overflow: hidden;
+    z-index: 11;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  #gauge.show { opacity: 1; }
+  #gaugeFill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #5fc9d8, #f4b45a, #ff6a6a);
+    border-radius: 999px;
+    transition: width 0.08s linear;
+    box-shadow: 0 0 8px rgba(244,180,90,0.6);
+  }
+
+  #result {
+    position: fixed; inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 30;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.5s;
+    background: radial-gradient(circle at center, rgba(7,8,13,0) 30%, rgba(7,8,13,0.7) 100%);
+  }
+  #result.show { opacity: 1; pointer-events: auto; }
+  #result .scoreL { font-size: 11px; letter-spacing: 0.3em; opacity: 0.6; margin-bottom: 12px; }
+  #result .scoreV {
+    font-size: 64px; font-weight: 200;
+    font-feature-settings: "tnum";
+    color: #f4ecd6;
+    text-shadow: 0 0 20px rgba(244,180,90,0.5);
+  }
+  #result .best {
+    margin-top: 14px;
+    font-size: 12px; letter-spacing: 0.18em;
+    opacity: 0.7;
+  }
+  #result .retry {
+    margin-top: 36px;
+    padding: 12px 28px;
+    border: 1px solid rgba(255,255,255,0.25);
+    border-radius: 999px;
+    font-size: 13px;
+    letter-spacing: 0.25em;
+    background: rgba(255,255,255,0.04);
+    pointer-events: auto;
+  }
+  #result .retry:active { background: rgba(255,255,255,0.12); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="cv"></canvas>
+</div>
+
+<a id="back" href="../../index.html">← もどる</a>
+
+<div id="top" class="ui">
+  <div>
+    <div class="lbl">HEIGHT</div>
+    <div class="val"><span id="hVal">0</span><span class="unit">m</span></div>
+  </div>
+  <div style="text-align:right;">
+    <div class="lbl">SCORE</div>
+    <div class="val" id="sVal">0</div>
+  </div>
+</div>
+
+<div id="hint" class="show">
+  <div class="main">指で 擦って 回せ</div>
+  <div class="sub">SWIPE BACK AND FORTH</div>
+</div>
+
+<div id="gauge"><div id="gaugeFill"></div></div>
+
+<div id="result">
+  <div class="scoreL">SCORE</div>
+  <div class="scoreV" id="rScore">0</div>
+  <div class="best">BEST <span id="rBest">0</span></div>
+  <div class="retry" id="retry">もう一度</div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  const hintEl = document.getElementById('hint');
+  const gaugeEl = document.getElementById('gauge');
+  const gaugeFill = document.getElementById('gaugeFill');
+  const hVal = document.getElementById('hVal');
+  const sVal = document.getElementById('sVal');
+  const resultEl = document.getElementById('result');
+  const rScore = document.getElementById('rScore');
+  const rBest = document.getElementById('rBest');
+  const retryBtn = document.getElementById('retry');
+
+  let W = 0, H = 0, DPR = 1;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    cv.width = W * DPR;
+    cv.height = H * DPR;
+    cv.style.width = W + 'px';
+    cv.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', () => setTimeout(resize, 100));
+
+  function vib(ms) {
+    if (navigator.vibrate) navigator.vibrate(ms);
+  }
+
+  // ============ Game State =============
+  const State = { READY: 0, CHARGE: 1, FLY: 2, FALL: 3, RESULT: 4 };
+  let state = State.READY;
+
+  let score = 0;
+  let bestScore = +(localStorage.getItem('takeTonboBest') || 0);
+  let heightM = 0;
+  let maxHeight = 0;
+
+  // tonbo (the dragonfly toy)
+  const tonbo = {
+    x: 0, y: 0,      // screen position
+    worldY: 0,       // distance flown upward (m * scale)
+    vy: 0,           // vertical velocity (px/sec upward positive)
+    vx: 0,           // horizontal velocity
+    spin: 0,         // visual rotation angle
+    spinSpeed: 0,    // rad/sec
+    charge: 0,       // 0..1
+    alive: true,
+    targetX: 0,
+  };
+
+  let lastTouch = null;
+  let touchActive = false;
+  let chargeDecay = 0;
+  let lastTouchTime = 0;
+
+  // World scroll (camera follows tonbo)
+  let cameraY = 0;  // amount the world has scrolled
+
+  // Wind
+  let wind = 0;
+  let windTarget = 0;
+  let windNextChange = 0;
+
+  // Particles
+  const particles = [];
+  // Stars (collectibles) and clouds (hazards)
+  const items = [];
+  let nextSpawnY = -200;  // worldY where next spawn happens
+
+  // Background stars
+  const bgStars = [];
+  for (let i = 0; i < 80; i++) {
+    bgStars.push({
+      x: Math.random(),
+      y: Math.random() * 3,
+      r: Math.random() * 1.4 + 0.3,
+      tw: Math.random() * Math.PI * 2,
+      tws: Math.random() * 2 + 1,
+    });
+  }
+
+  function resetGame() {
+    state = State.READY;
+    score = 0;
+    heightM = 0;
+    maxHeight = 0;
+    tonbo.x = W / 2;
+    tonbo.y = H * 0.7;
+    tonbo.worldY = 0;
+    tonbo.vy = 0;
+    tonbo.vx = 0;
+    tonbo.spin = 0;
+    tonbo.spinSpeed = 0;
+    tonbo.charge = 0;
+    tonbo.alive = true;
+    tonbo.targetX = W / 2;
+    cameraY = 0;
+    wind = 0;
+    windTarget = 0;
+    windNextChange = 2;
+    particles.length = 0;
+    items.length = 0;
+    nextSpawnY = -200;
+    hintEl.classList.add('show');
+    gaugeEl.classList.remove('show');
+    resultEl.classList.remove('show');
+    updateUI();
+  }
+
+  function updateUI() {
+    sVal.textContent = score;
+    hVal.textContent = Math.max(0, Math.floor(heightM));
+  }
+
+  // ============ Input =============
+
+  function getPoint(ev) {
+    const t = ev.touches ? ev.touches[0] : ev;
+    if (!t) return null;
+    const r = cv.getBoundingClientRect();
+    return { x: t.clientX - r.left, y: t.clientY - r.top };
+  }
+
+  function onStart(ev) {
+    ev.preventDefault();
+    const p = getPoint(ev);
+    if (!p) return;
+    if (state === State.READY) {
+      state = State.CHARGE;
+      hintEl.classList.remove('show');
+      gaugeEl.classList.add('show');
+      lastTouch = p;
+      lastTouchTime = performance.now();
+      touchActive = true;
+    } else if (state === State.CHARGE) {
+      lastTouch = p;
+      lastTouchTime = performance.now();
+      touchActive = true;
+    } else if (state === State.FLY) {
+      // Steer left/right based on tap position
+      tonbo.targetX = p.x;
+      touchActive = true;
+      lastTouch = p;
+    }
+  }
+
+  function onMove(ev) {
+    ev.preventDefault();
+    const p = getPoint(ev);
+    if (!p) return;
+    if (state === State.CHARGE && touchActive && lastTouch) {
+      const now = performance.now();
+      const dt = Math.max(1, now - lastTouchTime) / 1000;
+      const dx = p.x - lastTouch.x;
+      const speed = Math.abs(dx) / dt;  // px/sec
+      // Add to charge based on swipe speed (only horizontal swipes count)
+      const add = Math.min(0.04, speed / 60000) * (Math.abs(dx) > 4 ? 1 : 0);
+      tonbo.charge = Math.min(1, tonbo.charge + add);
+      tonbo.spinSpeed = tonbo.charge * 30 + Math.abs(dx) * 0.04;
+      // Spawn small spark particles from tonbo
+      if (Math.abs(dx) > 5) {
+        for (let i = 0; i < 2; i++) {
+          particles.push({
+            x: tonbo.x + (Math.random() - 0.5) * 30,
+            y: tonbo.y + (Math.random() - 0.5) * 10,
+            vx: dx * 0.5 + (Math.random() - 0.5) * 80,
+            vy: -Math.random() * 100,
+            life: 0.4,
+            max: 0.4,
+            color: '#f4b45a',
+            size: Math.random() * 2 + 1,
+          });
+        }
+      }
+      lastTouch = p;
+      lastTouchTime = now;
+      gaugeFill.style.width = (tonbo.charge * 100) + '%';
+    } else if (state === State.FLY && touchActive) {
+      tonbo.targetX = p.x;
+      lastTouch = p;
+    }
+  }
+
+  function onEnd(ev) {
+    ev.preventDefault();
+    touchActive = false;
+    if (state === State.CHARGE) {
+      if (tonbo.charge < 0.08) {
+        // Stayed too low - back to ready
+        // keep CHARGE state until they release with some power, or reset
+        // Actually: just launch with whatever they have
+      }
+      launch();
+    }
+  }
+
+  cv.addEventListener('touchstart', onStart, { passive: false });
+  cv.addEventListener('touchmove', onMove, { passive: false });
+  cv.addEventListener('touchend', onEnd, { passive: false });
+  cv.addEventListener('touchcancel', onEnd, { passive: false });
+  cv.addEventListener('mousedown', onStart);
+  cv.addEventListener('mousemove', (e) => { if (touchActive) onMove(e); });
+  cv.addEventListener('mouseup', onEnd);
+  cv.addEventListener('mouseleave', (e) => { if (touchActive) onEnd(e); });
+
+  retryBtn.addEventListener('click', () => {
+    resetGame();
+  });
+  retryBtn.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    resetGame();
+  });
+
+  // ============ Game Logic =============
+
+  function launch() {
+    state = State.FLY;
+    gaugeEl.classList.remove('show');
+    // Base upward velocity from charge
+    tonbo.vy = -(360 + tonbo.charge * 1400);
+    tonbo.vx = 0;
+    tonbo.targetX = tonbo.x;
+    vib(20);
+    // Burst particles
+    for (let i = 0; i < 24; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = Math.random() * 200 + 80;
+      particles.push({
+        x: tonbo.x, y: tonbo.y,
+        vx: Math.cos(a) * s,
+        vy: Math.sin(a) * s,
+        life: 0.7,
+        max: 0.7,
+        color: '#f4b45a',
+        size: Math.random() * 2 + 1.5,
+      });
+    }
+  }
+
+  function spawnAhead() {
+    while (tonbo.worldY > nextSpawnY - H * 1.4) {
+      const yWorld = nextSpawnY;
+      const xRatio = 0.15 + Math.random() * 0.7;
+      const screenX = xRatio * W;
+      const r = Math.random();
+      let type;
+      // Higher altitude => more rewards but more clouds too
+      const heightMeters = nextSpawnY * -0.04;
+      if (r < 0.55) {
+        type = 'star';
+      } else if (r < 0.78) {
+        type = 'kite';  // paper crane / lantern (bonus)
+      } else {
+        type = 'cloud';
+      }
+      // Inject lift currents at some altitudes
+      if (heightMeters > 30 && r > 0.9) type = 'lift';
+      items.push({
+        type,
+        x: screenX,
+        worldY: yWorld,
+        r: type === 'cloud' ? 50 + Math.random() * 30 : type === 'lift' ? 60 : type === 'kite' ? 14 : 9,
+        phase: Math.random() * Math.PI * 2,
+        taken: false,
+      });
+      nextSpawnY -= 110 + Math.random() * 80;
+    }
+  }
+
+  function updateGame(dt) {
+    // Update wind
+    windNextChange -= dt;
+    if (windNextChange <= 0) {
+      windTarget = (Math.random() - 0.5) * 90;
+      windNextChange = 2 + Math.random() * 3;
+    }
+    wind += (windTarget - wind) * Math.min(1, dt * 1.5);
+
+    // Background twinkle
+    for (let s of bgStars) s.tw += dt * s.tws;
+
+    if (state === State.CHARGE) {
+      // Charge decays over time if not swiped
+      const now = performance.now();
+      const sinceTouch = (now - lastTouchTime) / 1000;
+      if (sinceTouch > 0.18) {
+        tonbo.charge = Math.max(0, tonbo.charge - dt * 0.25);
+        gaugeFill.style.width = (tonbo.charge * 100) + '%';
+      }
+      tonbo.spinSpeed *= 0.92;
+      tonbo.spin += tonbo.spinSpeed * dt;
+      // wobble
+      tonbo.x = W / 2 + Math.sin(performance.now() * 0.003) * 4;
+      tonbo.y = H * 0.7 + Math.cos(performance.now() * 0.005) * 3;
+    } else if (state === State.FLY) {
+      // Spin slows over time
+      tonbo.spinSpeed = Math.max(8, tonbo.spinSpeed - dt * 3);
+      tonbo.spin += tonbo.spinSpeed * dt;
+      // Gravity
+      tonbo.vy += 480 * dt;
+      // Horizontal: drift toward target + wind
+      if (tonbo.targetX !== tonbo.x) {
+        const dx = tonbo.targetX - tonbo.x;
+        tonbo.vx += dx * dt * 4;
+      }
+      tonbo.vx += wind * dt;
+      tonbo.vx *= Math.pow(0.6, dt);  // air friction
+      tonbo.x += tonbo.vx * dt;
+      // Clamp horizontally
+      if (tonbo.x < 30) { tonbo.x = 30; tonbo.vx *= -0.4; }
+      if (tonbo.x > W - 30) { tonbo.x = W - 30; tonbo.vx *= -0.4; }
+      // Move worldY (the tonbo rises). worldY decreases as tonbo flies up.
+      tonbo.worldY += tonbo.vy * dt;
+      // Camera: keep tonbo around 0.35 of screen when going up
+      const targetY = H * 0.45;
+      tonbo.y = targetY;
+      // Update height meter
+      const m = Math.max(0, -tonbo.worldY * 0.04);
+      heightM = m;
+      maxHeight = Math.max(maxHeight, m);
+      // Spawn items ahead
+      spawnAhead();
+      // Check items collisions
+      for (const it of items) {
+        if (it.taken) continue;
+        const sy = (it.worldY - tonbo.worldY) + tonbo.y;
+        if (sy < -100 || sy > H + 100) continue;
+        const dx = it.x - tonbo.x;
+        const dy = sy - tonbo.y;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        const hitR = it.r + 18;
+        if (d < hitR) {
+          if (it.type === 'star') {
+            it.taken = true;
+            score += 10;
+            burst(tonbo.x, tonbo.y, '#d6ecff', 10);
+            vib(8);
+          } else if (it.type === 'kite') {
+            it.taken = true;
+            score += 30;
+            tonbo.vy -= 100;  // small boost
+            burst(tonbo.x, tonbo.y, '#ffb6c1', 14);
+            vib(14);
+          } else if (it.type === 'lift') {
+            // Lift current: continuous boost while inside
+            tonbo.vy -= 400 * dt;
+            it.phase += dt * 4;
+            // Don't take it permanently; small trickle of particles
+            if (Math.random() < 0.3) {
+              particles.push({
+                x: tonbo.x + (Math.random() - 0.5) * 30,
+                y: tonbo.y + 20,
+                vx: (Math.random() - 0.5) * 30,
+                vy: -100 - Math.random() * 80,
+                life: 0.8, max: 0.8,
+                color: '#f4b45a',
+                size: Math.random() * 1.5 + 0.8,
+              });
+            }
+          } else if (it.type === 'cloud') {
+            if (!it.taken) {
+              it.taken = true;
+              tonbo.vy *= 0.4;  // big slow-down
+              tonbo.vy += 100;
+              burst(tonbo.x, tonbo.y, '#8a93a8', 12);
+              vib([20, 30, 20]);
+            }
+          }
+        }
+      }
+      // Failure: started falling and lost too much altitude
+      if (tonbo.vy > 0 && tonbo.worldY > -50) {
+        // Coming back to ground
+        // Check if we even left the ground meaningfully
+      }
+      if (tonbo.vy > 60 && state === State.FLY) {
+        // Falling now; let it fall toward result
+        // Transition once near "ground" of current view
+      }
+      // Camera-based result trigger: if vy positive and tonbo descends past starting altitude
+      if (tonbo.worldY >= 0 && tonbo.vy > 0) {
+        endRun();
+      }
+      // Update items: remove far-below
+      for (let i = items.length - 1; i >= 0; i--) {
+        const it = items[i];
+        const sy = (it.worldY - tonbo.worldY) + tonbo.y;
+        if (sy > H + 200) items.splice(i, 1);
+      }
+    }
+
+    // Update particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.life -= dt;
+      if (p.life <= 0) { particles.splice(i, 1); continue; }
+      p.vy += 300 * dt;  // gravity for particles
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= Math.pow(0.5, dt);
+    }
+
+    updateUI();
+  }
+
+  function burst(x, y, color, n) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = Math.random() * 180 + 60;
+      particles.push({
+        x, y,
+        vx: Math.cos(a) * s,
+        vy: Math.sin(a) * s,
+        life: 0.5 + Math.random() * 0.3,
+        max: 0.8,
+        color,
+        size: Math.random() * 2 + 1,
+      });
+    }
+  }
+
+  function endRun() {
+    state = State.RESULT;
+    score += Math.floor(maxHeight) * 2;
+    if (score > bestScore) {
+      bestScore = score;
+      localStorage.setItem('takeTonboBest', String(bestScore));
+    }
+    rScore.textContent = score;
+    rBest.textContent = bestScore;
+    resultEl.classList.add('show');
+    vib([30, 60, 30]);
+  }
+
+  // ============ Rendering =============
+
+  function drawBackground() {
+    // Vertical gradient based on altitude
+    const m = heightM;
+    const t = Math.min(1, m / 200);
+    // From midnight forest blue to high purple-aurora
+    const c1 = mixHex('#0b1224', '#1a1232', t);
+    const c2 = mixHex('#15203c', '#3a1d52', t);
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, c2);
+    grad.addColorStop(1, c1);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Far stars
+    ctx.save();
+    const offset = (tonbo.worldY * 0.05) % H;
+    for (const s of bgStars) {
+      const x = s.x * W;
+      let y = (s.y * H + offset) % (H * 3);
+      if (y < 0) y += H * 3;
+      y = y % H;
+      const alpha = 0.4 + 0.6 * Math.sin(s.tw) * 0.5 + 0.3;
+      ctx.fillStyle = `rgba(220,230,255,${alpha})`;
+      ctx.beginPath();
+      ctx.arc(x, y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // Ground silhouette when low altitude
+    if (heightM < 80 || state === State.READY || state === State.CHARGE) {
+      const groundFade = state === State.READY || state === State.CHARGE ? 1 : Math.max(0, 1 - heightM / 80);
+      ctx.save();
+      ctx.globalAlpha = groundFade;
+      // Distant mountains
+      ctx.fillStyle = '#0a0d18';
+      ctx.beginPath();
+      const baseY = H * 0.85 + (state === State.FLY ? Math.min(200, -tonbo.worldY * 0.3) : 0);
+      ctx.moveTo(0, H);
+      ctx.lineTo(0, baseY);
+      const peaks = 6;
+      for (let i = 0; i <= peaks; i++) {
+        const px = (i / peaks) * W;
+        const py = baseY - Math.sin(i * 1.7) * 30 - (i % 2 === 0 ? 40 : 20);
+        ctx.lineTo(px, py);
+      }
+      ctx.lineTo(W, H);
+      ctx.closePath();
+      ctx.fill();
+
+      // Tree line / grass
+      ctx.fillStyle = '#06080f';
+      ctx.beginPath();
+      const gY = H * 0.92 + (state === State.FLY ? Math.min(300, -tonbo.worldY * 0.5) : 0);
+      ctx.moveTo(0, H);
+      ctx.lineTo(0, gY);
+      for (let x = 0; x <= W; x += 18) {
+        const variance = Math.sin(x * 0.13) * 6 + Math.cos(x * 0.07) * 4;
+        ctx.lineTo(x, gY + variance);
+      }
+      ctx.lineTo(W, H);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Optional aurora at high altitude
+    if (heightM > 60) {
+      const auroraA = Math.min(0.6, (heightM - 60) / 200);
+      ctx.save();
+      ctx.globalAlpha = auroraA;
+      const t2 = performance.now() * 0.0004;
+      for (let i = 0; i < 3; i++) {
+        const grad2 = ctx.createLinearGradient(0, 0, W, H);
+        grad2.addColorStop(0, ['rgba(95,201,216,0.5)', 'rgba(180,130,220,0.4)', 'rgba(244,180,90,0.3)'][i]);
+        grad2.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grad2;
+        ctx.beginPath();
+        ctx.moveTo(0, H * 0.2 + Math.sin(t2 + i) * 40);
+        for (let x = 0; x <= W; x += 20) {
+          ctx.lineTo(x, H * 0.2 + Math.sin(t2 + i + x * 0.01) * 60 + i * 25);
+        }
+        ctx.lineTo(W, 0);
+        ctx.lineTo(0, 0);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
+  function mixHex(a, b, t) {
+    const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+    const ar = (pa >> 16) & 0xff, ag = (pa >> 8) & 0xff, ab = pa & 0xff;
+    const br = (pb >> 16) & 0xff, bg = (pb >> 8) & 0xff, bb = pb & 0xff;
+    const r = Math.round(ar + (br - ar) * t);
+    const g = Math.round(ag + (bg - ag) * t);
+    const bl = Math.round(ab + (bb - ab) * t);
+    return `rgb(${r},${g},${bl})`;
+  }
+
+  function drawTonbo(x, y, angle, chargeT) {
+    ctx.save();
+    ctx.translate(x, y);
+    // Glow when charging
+    if (chargeT > 0.05) {
+      const glowR = 30 + chargeT * 40;
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
+      g.addColorStop(0, `rgba(244,180,90,${0.3 + chargeT * 0.4})`);
+      g.addColorStop(1, 'rgba(244,180,90,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(0, 0, glowR, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Stem (the bamboo shaft) - vertical, doesn't rotate
+    ctx.strokeStyle = '#caa67a';
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(0, -2);
+    ctx.lineTo(0, 28);
+    ctx.stroke();
+    // Notches on bamboo
+    ctx.strokeStyle = '#8a6f4a';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-3, 10); ctx.lineTo(3, 10);
+    ctx.moveTo(-3, 22); ctx.lineTo(3, 22);
+    ctx.stroke();
+
+    // Rotating propeller
+    ctx.rotate(angle);
+    // Two blades
+    for (let i = 0; i < 2; i++) {
+      ctx.save();
+      ctx.rotate(i * Math.PI);
+      // Blade shape (curved leaf-like)
+      const grad = ctx.createLinearGradient(0, 0, 32, 0);
+      grad.addColorStop(0, '#e6d3a8');
+      grad.addColorStop(0.5, '#f4ecd6');
+      grad.addColorStop(1, '#caa67a');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(2, -3);
+      ctx.quadraticCurveTo(20, -10, 32, -2);
+      ctx.quadraticCurveTo(28, 0, 32, 2);
+      ctx.quadraticCurveTo(20, 10, 2, 3);
+      ctx.closePath();
+      ctx.fill();
+      // Blade vein
+      ctx.strokeStyle = 'rgba(120,90,60,0.4)';
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(4, 0);
+      ctx.lineTo(28, 0);
+      ctx.stroke();
+      ctx.restore();
+    }
+    // Hub
+    ctx.fillStyle = '#8a6f4a';
+    ctx.beginPath();
+    ctx.arc(0, 0, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#caa67a';
+    ctx.beginPath();
+    ctx.arc(0, 0, 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawHands(x, y) {
+    // Two hands cradling the bamboo when in READY/CHARGE
+    ctx.save();
+    ctx.translate(x, y + 20);
+    ctx.fillStyle = 'rgba(240,220,200,0.85)';
+    ctx.beginPath();
+    ctx.ellipse(-12, 8, 14, 8, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(12, 8, 14, 8, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    // Knuckles
+    ctx.fillStyle = 'rgba(200,170,140,0.7)';
+    ctx.beginPath();
+    ctx.arc(-12, 6, 2, 0, Math.PI * 2);
+    ctx.arc(12, 6, 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawItem(it, sy) {
+    if (it.taken) return;
+    ctx.save();
+    if (it.type === 'star') {
+      const tw = Math.sin(performance.now() * 0.005 + it.phase) * 0.3 + 0.7;
+      ctx.translate(it.x, sy);
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 20);
+      g.addColorStop(0, `rgba(214,236,255,${tw})`);
+      g.addColorStop(0.5, `rgba(140,180,240,${tw * 0.4})`);
+      g.addColorStop(1, 'rgba(140,180,240,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(0, 0, 20, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = `rgba(255,255,255,${tw})`;
+      drawStarShape(0, 0, it.r, 5);
+    } else if (it.type === 'kite') {
+      // Paper crane / lantern - pink
+      const tw = Math.sin(performance.now() * 0.003 + it.phase);
+      ctx.translate(it.x, sy);
+      ctx.rotate(tw * 0.15);
+      // Glow
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 30);
+      g.addColorStop(0, 'rgba(255,182,193,0.5)');
+      g.addColorStop(1, 'rgba(255,182,193,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(0, 0, 30, 0, Math.PI * 2);
+      ctx.fill();
+      // Crane body (triangular)
+      ctx.fillStyle = '#ffc6d4';
+      ctx.beginPath();
+      ctx.moveTo(0, -it.r);
+      ctx.lineTo(it.r, it.r * 0.7);
+      ctx.lineTo(-it.r, it.r * 0.7);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#ff9eb6';
+      ctx.beginPath();
+      ctx.moveTo(0, -it.r);
+      ctx.lineTo(it.r * 0.5, 0);
+      ctx.lineTo(-it.r * 0.5, 0);
+      ctx.closePath();
+      ctx.fill();
+    } else if (it.type === 'lift') {
+      // Updraft - upward streaks
+      ctx.translate(it.x, sy);
+      it.phase += 0.02;
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, it.r);
+      g.addColorStop(0, 'rgba(244,180,90,0.15)');
+      g.addColorStop(1, 'rgba(244,180,90,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(0, 0, it.r, 0, Math.PI * 2);
+      ctx.fill();
+      // Vertical streaks
+      ctx.strokeStyle = 'rgba(244,180,90,0.45)';
+      ctx.lineWidth = 1;
+      ctx.lineCap = 'round';
+      for (let i = 0; i < 6; i++) {
+        const sx = (i / 5 - 0.5) * it.r * 1.4;
+        const phase = (it.phase + i * 0.3) % 1;
+        const yTop = -it.r + phase * it.r * 2;
+        ctx.beginPath();
+        ctx.moveTo(sx, yTop);
+        ctx.lineTo(sx, yTop + 24);
+        ctx.stroke();
+      }
+    } else if (it.type === 'cloud') {
+      ctx.translate(it.x, sy);
+      // Dark rain cloud
+      ctx.fillStyle = 'rgba(50,60,80,0.85)';
+      const lobes = [
+        [0, 0, it.r],
+        [-it.r * 0.6, 5, it.r * 0.7],
+        [it.r * 0.6, 5, it.r * 0.7],
+        [-it.r * 0.3, -10, it.r * 0.5],
+        [it.r * 0.3, -10, it.r * 0.55],
+      ];
+      for (const [x, y, r] of lobes) {
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Rain
+      ctx.strokeStyle = 'rgba(140,160,200,0.6)';
+      ctx.lineWidth = 1.5;
+      ctx.lineCap = 'round';
+      for (let i = 0; i < 5; i++) {
+        const rx = (i / 4 - 0.5) * it.r * 1.6;
+        const ry = it.r * 0.6 + (performance.now() * 0.06 + i * 25) % 30;
+        ctx.beginPath();
+        ctx.moveTo(rx, ry);
+        ctx.lineTo(rx - 2, ry + 8);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawStarShape(cx, cy, r, points) {
+    ctx.beginPath();
+    for (let i = 0; i < points * 2; i++) {
+      const rad = i % 2 === 0 ? r : r * 0.45;
+      const a = (i / (points * 2)) * Math.PI * 2 - Math.PI / 2;
+      const px = cx + Math.cos(a) * rad;
+      const py = cy + Math.sin(a) * rad;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function drawParticles() {
+    for (const p of particles) {
+      const a = Math.max(0, p.life / p.max);
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * a, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  function render() {
+    drawBackground();
+
+    if (state === State.FLY) {
+      // Draw items relative to camera
+      for (const it of items) {
+        const sy = (it.worldY - tonbo.worldY) + tonbo.y;
+        if (sy < -100 || sy > H + 100) continue;
+        drawItem(it, sy);
+      }
+    }
+
+    drawParticles();
+
+    if (state === State.READY || state === State.CHARGE) {
+      // Show hands cradling the tonbo
+      drawHands(tonbo.x, tonbo.y);
+    }
+
+    if (state !== State.RESULT) {
+      drawTonbo(tonbo.x, tonbo.y, tonbo.spin, tonbo.charge);
+    }
+
+    // Wind hint
+    if (state === State.FLY && Math.abs(wind) > 30) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+      ctx.lineWidth = 1;
+      const t = performance.now() * 0.002;
+      for (let i = 0; i < 3; i++) {
+        const yL = H * 0.2 + i * 80 + Math.sin(t + i) * 10;
+        const dir = Math.sign(wind);
+        const len = Math.min(80, Math.abs(wind));
+        ctx.beginPath();
+        ctx.moveTo(W / 2 + dir * 40 - dir * len, yL);
+        ctx.quadraticCurveTo(W / 2 + dir * 60, yL - 4, W / 2 + dir * 80, yL);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
+  // ============ Loop =============
+
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    updateGame(dt);
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  resetGame();
+  requestAnimationFrame(loop);
+
+  // Prevent context menu / pull-to-refresh
+  document.addEventListener('gesturestart', e => e.preventDefault());
+  document.addEventListener('contextmenu', e => e.preventDefault());
+
+})();
+</script>
+</body>
+</html>
