@@ -1,0 +1,1003 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a1a">
+<title>羽根つき — Hane-tsuki</title>
+<style>
+  :root {
+    --bg-a: #1a0a2e;
+    --bg-b: #050818;
+    --gold: #f5c466;
+    --gold-soft: #ffe2a0;
+    --crimson: #d24a4a;
+    --crimson-dark: #7a2020;
+    --paper: #f0e6d2;
+    --ink: #0a0a0a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    touch-action: manipulation;
+    user-select: none; -webkit-user-select: none;
+    overscroll-behavior: none;
+  }
+  body {
+    background: var(--bg-b);
+    font-family: "Hiragino Mincho ProN", "Yu Mincho", serif;
+    color: var(--paper);
+  }
+  canvas {
+    display: block;
+    position: fixed; inset: 0;
+    width: 100%; height: 100%;
+    z-index: 1;
+  }
+  .ui {
+    position: fixed; left: 0; right: 0;
+    pointer-events: none; z-index: 5;
+  }
+  .top {
+    top: env(safe-area-inset-top, 0px);
+    padding: 18px 22px 0;
+    display: flex; justify-content: space-between; align-items: flex-start;
+  }
+  .label {
+    font-size: 10px; opacity: 0.6;
+    letter-spacing: 5px; margin-bottom: 4px;
+    font-family: sans-serif;
+  }
+  .score {
+    font-size: 38px; font-weight: 300;
+    color: var(--gold);
+    text-shadow: 0 2px 16px rgba(245,196,102,0.45);
+    letter-spacing: 3px;
+    line-height: 1;
+  }
+  .lives {
+    display: flex; gap: 8px; justify-content: flex-end;
+  }
+  .life {
+    width: 22px; height: 22px; border-radius: 50%;
+    border: 1.5px solid rgba(240,230,210,0.7);
+    background: rgba(0,0,0,0.1);
+    transition: all 0.4s cubic-bezier(.2,.8,.3,1);
+    position: relative; overflow: hidden;
+  }
+  .life.lost {
+    background: #0a0a0a;
+    border-color: #2a2a2a;
+    transform: scale(0.88) rotate(8deg);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.6);
+  }
+  .life.lost::after {
+    content: ""; position: absolute; inset: -4px;
+    background: radial-gradient(circle, #0a0a0a 40%, transparent 70%);
+    filter: blur(2px); opacity: 0.7;
+  }
+  .back {
+    position: fixed;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+    left: 14px;
+    padding: 7px 12px;
+    font-size: 11px;
+    color: var(--paper);
+    opacity: 0.45;
+    text-decoration: none;
+    border: 1px solid rgba(240,230,210,0.25);
+    border-radius: 3px;
+    z-index: 6;
+    background: rgba(0,0,0,0.35);
+    pointer-events: auto;
+    letter-spacing: 2px;
+    font-family: sans-serif;
+  }
+  .combo {
+    position: fixed;
+    top: 38%; left: 50%;
+    transform: translate(-50%, -50%) scale(1);
+    font-size: 88px; font-weight: 300;
+    color: var(--gold);
+    pointer-events: none;
+    opacity: 0;
+    z-index: 4;
+    text-shadow: 0 0 32px rgba(245,196,102,0.7);
+    letter-spacing: 4px;
+    transition: opacity 0.5s, transform 0.5s cubic-bezier(.1,.9,.3,1);
+  }
+  .overlay {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center; flex-direction: column;
+    background: rgba(5,8,24,0.78);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    z-index: 20;
+    pointer-events: auto;
+    padding: 40px 24px;
+    text-align: center;
+  }
+  .overlay h1 {
+    font-size: 54px;
+    color: var(--gold);
+    margin-bottom: 6px;
+    letter-spacing: 16px;
+    text-indent: 16px;
+    font-weight: 400;
+    text-shadow: 0 0 40px rgba(245,196,102,0.5);
+  }
+  .overlay h2 {
+    font-size: 11px;
+    opacity: 0.55;
+    margin-bottom: 38px;
+    letter-spacing: 8px;
+    font-family: sans-serif;
+  }
+  .overlay .desc {
+    font-size: 14px;
+    opacity: 0.85;
+    letter-spacing: 2px;
+    line-height: 2.1;
+    margin-bottom: 8px;
+  }
+  .overlay .big {
+    font-size: 84px;
+    color: var(--gold);
+    margin: 18px 0 6px;
+    font-weight: 300;
+    text-shadow: 0 0 36px rgba(245,196,102,0.6);
+    letter-spacing: 6px;
+  }
+  .overlay .small {
+    font-size: 12px;
+    opacity: 0.65;
+    margin-top: 8px;
+    letter-spacing: 4px;
+    line-height: 1.9;
+    font-family: sans-serif;
+  }
+  .overlay .combo-row {
+    font-size: 14px;
+    opacity: 0.85;
+    letter-spacing: 4px;
+    margin-top: 18px;
+  }
+  .overlay .combo-row b {
+    color: var(--gold);
+    font-weight: 400;
+    font-size: 18px;
+  }
+  .overlay button {
+    margin-top: 44px;
+    padding: 14px 42px;
+    font-size: 13px;
+    background: transparent;
+    color: var(--paper);
+    border: 1px solid var(--gold);
+    border-radius: 2px;
+    letter-spacing: 8px;
+    text-indent: 8px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s;
+  }
+  .overlay button:active { background: rgba(245,196,102,0.15); transform: scale(0.97); }
+  .hidden { display: none !important; }
+  .hint {
+    position: absolute;
+    bottom: 100px;
+    left: 0; right: 0;
+    text-align: center;
+    font-size: 11px;
+    opacity: 0.4;
+    letter-spacing: 3px;
+    font-family: sans-serif;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div class="ui top">
+  <div>
+    <div class="label">RALLY</div>
+    <div class="score" id="score">0</div>
+  </div>
+  <div>
+    <div class="label" style="text-align:right">残</div>
+    <div class="lives" id="lives">
+      <div class="life"></div>
+      <div class="life"></div>
+      <div class="life"></div>
+    </div>
+  </div>
+</div>
+
+<a class="back" href="../../index.html">← もどる</a>
+
+<div class="combo" id="combo"></div>
+
+<div class="overlay" id="start">
+  <h1>羽根つき</h1>
+  <h2>HANE — TSUKI</h2>
+  <div class="desc">
+    板を 左右に 動かして<br>
+    舞い落ちる 羽根を 打ち返す<br>
+    <span style="opacity:.6;font-size:12px;letter-spacing:3px">三度 落とせば 終 わ り</span>
+  </div>
+  <button id="startBtn">はじめる</button>
+</div>
+
+<div class="overlay hidden" id="end">
+  <h2 id="endTitle">結　果</h2>
+  <div class="big" id="finalScore">0</div>
+  <div class="small">打ち返した数</div>
+  <div class="combo-row">最長連 <b id="finalCombo">0</b></div>
+  <button id="restartBtn">もういちど</button>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  const cvs = document.getElementById('c');
+  const ctx = cvs.getContext('2d');
+  let W = 0, H = 0;
+  const DPR = Math.max(1, Math.min(window.devicePixelRatio || 1, 2.5));
+
+  function resize() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    cvs.width = Math.floor(W * DPR);
+    cvs.height = Math.floor(H * DPR);
+    cvs.style.width = W + 'px';
+    cvs.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    if (paddle) paddle.y = H - 110;
+  }
+
+  // === State ===
+  let state = 'start';
+  let score = 0;
+  let lives = 3;
+  let combo = 0;
+  let bestCombo = 0;
+  let frame = 0;
+  let wind = 0;
+  let windTarget = 0;
+
+  const paddle = {
+    x: 0, targetX: 0,
+    y: 0,
+    w: 96, h: 56,
+    tilt: 0, // visual tilt based on velocity
+    flash: 0,
+    shake: 0,
+    velX: 0,
+    lastX: 0,
+  };
+
+  const shuttle = {
+    x: 0, y: 0,
+    vx: 0, vy: 0,
+    rot: 0, rotV: 0,
+    alive: false,
+    spawning: false,
+    spawnTimer: 0,
+    trail: [],
+    golden: false,
+    flash: 0,
+  };
+
+  const particles = [];
+  const leaves = [];
+  const inkSplats = [];
+  const rallyText = [];
+
+  // === Setup ===
+  resize();
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', () => setTimeout(resize, 100));
+
+  function spawnLeaves() {
+    leaves.length = 0;
+    for (let i = 0; i < 18; i++) {
+      leaves.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        vy: 0.12 + Math.random() * 0.35,
+        rot: Math.random() * Math.PI * 2,
+        rotV: (Math.random() - 0.5) * 0.025,
+        size: 5 + Math.random() * 9,
+        hue: 20 + Math.random() * 30,
+        sat: 60 + Math.random() * 20,
+        light: 45 + Math.random() * 15,
+        alpha: 0.28 + Math.random() * 0.45,
+        depth: 0.3 + Math.random() * 1.4,
+      });
+    }
+  }
+  spawnLeaves();
+
+  function spawnShuttle(delay = 0) {
+    shuttle.spawning = true;
+    shuttle.spawnTimer = delay;
+    shuttle.alive = false;
+  }
+
+  function reallySpawn() {
+    shuttle.alive = true;
+    shuttle.spawning = false;
+    const margin = 60;
+    shuttle.x = margin + Math.random() * (W - margin * 2);
+    shuttle.y = -30;
+    // Choose a target near paddle, but not too easy
+    const aimX = W * (0.15 + Math.random() * 0.7);
+    const fallTime = Math.max(60, 130 - score * 1.6);
+    shuttle.vx = (aimX - shuttle.x) / fallTime;
+    shuttle.vy = 0.8 + Math.min(2.4, score * 0.045);
+    shuttle.rot = Math.random() * Math.PI;
+    shuttle.rotV = (Math.random() - 0.5) * 0.04;
+    shuttle.golden = score >= 4 && Math.random() < 0.1;
+    shuttle.trail.length = 0;
+    shuttle.flash = 0;
+    // shift wind occasionally
+    if (Math.random() < 0.35) {
+      windTarget = (Math.random() - 0.5) * 0.35;
+    }
+  }
+
+  function hitShuttle() {
+    const dx = (shuttle.x - paddle.x) / (paddle.w / 2);
+    // power based on paddle velocity
+    const power = Math.min(2.0, Math.abs(paddle.velX) * 0.12 + 1.0);
+    shuttle.vx = dx * 4.5 + paddle.velX * 0.4 + (Math.random() - 0.5) * 1.2;
+    shuttle.vy = -(9 + Math.min(4.5, score * 0.1)) * power;
+    shuttle.rotV = dx * 0.25 + paddle.velX * 0.02;
+    shuttle.flash = 1;
+
+    const points = shuttle.golden ? 3 : 1;
+    score += points;
+    combo++;
+    if (combo > bestCombo) bestCombo = combo;
+
+    paddle.flash = 1;
+    paddle.shake = 0.7;
+
+    // burst particles
+    const burstCount = shuttle.golden ? 32 : 22;
+    for (let i = 0; i < burstCount; i++) {
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 1.2;
+      const s = 2 + Math.random() * 5;
+      particles.push({
+        x: shuttle.x,
+        y: shuttle.y + 8,
+        vx: Math.cos(a) * s + paddle.velX * 0.2,
+        vy: Math.sin(a) * s - 1.5,
+        life: 30 + Math.random() * 30,
+        age: 0,
+        color: shuttle.golden ? 'gold' : 'spark',
+        size: 1.5 + Math.random() * 3,
+      });
+    }
+
+    // rally text flying up
+    rallyText.push({
+      x: shuttle.x, y: shuttle.y - 20,
+      text: '+' + points,
+      age: 0, life: 50,
+      golden: shuttle.golden,
+    });
+
+    if (navigator.vibrate) navigator.vibrate(shuttle.golden ? [12, 22, 18] : 18);
+    document.getElementById('score').textContent = score;
+
+    if (combo >= 3 && combo % 1 === 0) showCombo();
+  }
+
+  function missShuttle() {
+    shuttle.alive = false;
+    lives = Math.max(0, lives - 1);
+    combo = 0;
+    paddle.shake = 1.6;
+
+    // ink splat at bottom
+    inkSplats.push({
+      x: Math.max(40, Math.min(W - 40, shuttle.x)),
+      y: H - 70 + Math.random() * 25,
+      size: 28 + Math.random() * 18,
+      rot: Math.random() * Math.PI * 2,
+      seed: Math.random() * 1000,
+      alpha: 0,
+    });
+
+    if (navigator.vibrate) navigator.vibrate([28, 60, 38]);
+    updateLives();
+
+    if (lives <= 0) {
+      setTimeout(endGame, 900);
+    } else {
+      spawnShuttle(60);
+    }
+  }
+
+  function updateLives() {
+    const els = document.querySelectorAll('#lives .life');
+    els.forEach((el, i) => {
+      el.classList.toggle('lost', i >= lives);
+    });
+  }
+
+  let comboTimer = 0;
+  function showCombo() {
+    const el = document.getElementById('combo');
+    el.textContent = combo;
+    el.style.opacity = '1';
+    el.style.transform = 'translate(-50%, -50%) scale(1.25)';
+    comboTimer = 38;
+    setTimeout(() => {
+      el.style.transform = 'translate(-50%, -50%) scale(1.0)';
+    }, 80);
+  }
+
+  function endGame() {
+    state = 'end';
+    document.getElementById('finalScore').textContent = score;
+    document.getElementById('finalCombo').textContent = bestCombo;
+    let title = '結　果';
+    if (score >= 50) title = '名　手';
+    else if (score >= 25) title = '上　達';
+    else if (score >= 10) title = '一　息';
+    else title = '墨だらけ';
+    document.getElementById('endTitle').textContent = title;
+    document.getElementById('end').classList.remove('hidden');
+  }
+
+  function startGame() {
+    state = 'play';
+    score = 0;
+    lives = 3;
+    combo = 0;
+    bestCombo = 0;
+    particles.length = 0;
+    inkSplats.length = 0;
+    rallyText.length = 0;
+    wind = 0;
+    windTarget = 0;
+    document.getElementById('score').textContent = '0';
+    updateLives();
+    document.getElementById('start').classList.add('hidden');
+    document.getElementById('end').classList.add('hidden');
+    paddle.x = W / 2;
+    paddle.targetX = W / 2;
+    paddle.lastX = W / 2;
+    paddle.y = H - 110;
+    spawnShuttle(40);
+  }
+
+  // === Input ===
+  let pointerDown = false;
+  function getXY(e) {
+    if (e.touches && e.touches.length) {
+      return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    }
+    return { x: e.clientX, y: e.clientY };
+  }
+
+  function onDown(e) {
+    if (state !== 'play') return;
+    pointerDown = true;
+    paddle.targetX = getXY(e).x;
+    if (e.cancelable) e.preventDefault();
+  }
+  function onMove(e) {
+    if (!pointerDown || state !== 'play') return;
+    paddle.targetX = getXY(e).x;
+    if (e.cancelable) e.preventDefault();
+  }
+  function onUp() { pointerDown = false; }
+
+  cvs.addEventListener('touchstart', onDown, { passive: false });
+  cvs.addEventListener('touchmove', onMove, { passive: false });
+  cvs.addEventListener('touchend', onUp);
+  cvs.addEventListener('touchcancel', onUp);
+  cvs.addEventListener('mousedown', onDown);
+  cvs.addEventListener('mousemove', onMove);
+  cvs.addEventListener('mouseup', onUp);
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  // === Rendering helpers ===
+
+  function drawSakura(x, y, r, color, accent) {
+    ctx.save();
+    ctx.translate(x, y);
+    for (let i = 0; i < 5; i++) {
+      ctx.save();
+      ctx.rotate((i / 5) * Math.PI * 2);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.bezierCurveTo(r * 0.45, -r * 0.35, r * 0.45, -r * 1.0, 0, -r * 1.05);
+      ctx.bezierCurveTo(-r * 0.45, -r * 1.0, -r * 0.45, -r * 0.35, 0, 0);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.fillStyle = accent;
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawLeaf(s) {
+    ctx.beginPath();
+    ctx.moveTo(0, -s);
+    ctx.bezierCurveTo(s * 0.7, -s * 0.6, s * 0.7, s * 0.6, 0, s);
+    ctx.bezierCurveTo(-s * 0.7, s * 0.6, -s * 0.7, -s * 0.6, 0, -s);
+    ctx.fill();
+    // vein
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(0, -s * 0.8);
+    ctx.lineTo(0, s * 0.8);
+    ctx.stroke();
+  }
+
+  function drawInkSplat(s, seed) {
+    ctx.beginPath();
+    const segs = 14;
+    for (let i = 0; i <= segs; i++) {
+      const a = (i / segs) * Math.PI * 2;
+      const wobble = Math.sin(seed + i * 1.3) * 0.25 + Math.cos(seed * 0.7 + i * 2.1) * 0.18;
+      const r = s * (0.78 + wobble);
+      const x = Math.cos(a) * r;
+      const y = Math.sin(a) * r * 0.7;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fill();
+    // satellite drops
+    for (let i = 0; i < 4; i++) {
+      const a = seed + i * 1.7;
+      const d = s * (1.2 + Math.sin(seed + i * 2) * 0.3);
+      const sr = s * 0.18 * (0.6 + Math.sin(seed + i * 3.1) * 0.4);
+      ctx.beginPath();
+      ctx.arc(Math.cos(a) * d, Math.sin(a) * d * 0.65, sr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawShuttle(x, y, rot, golden, flash) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rot);
+
+    // soft glow
+    if (golden) {
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 38);
+      g.addColorStop(0, 'rgba(245,196,102,0.55)');
+      g.addColorStop(1, 'rgba(245,196,102,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(0, 0, 38, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (flash > 0.05) {
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 30);
+      g.addColorStop(0, `rgba(255,245,214,${flash * 0.55})`);
+      g.addColorStop(1, 'rgba(255,245,214,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(0, 0, 30, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // feathers
+    const feathers = 5;
+    for (let i = 0; i < feathers; i++) {
+      const a = (i - (feathers - 1) / 2) * 0.32;
+      ctx.save();
+      ctx.rotate(a);
+      // shaft
+      ctx.strokeStyle = '#5a3a2a';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, 4);
+      ctx.lineTo(0, -22);
+      ctx.stroke();
+      // vane
+      const grad = ctx.createLinearGradient(0, -22, 0, 4);
+      if (golden) {
+        grad.addColorStop(0, '#fff5d6');
+        grad.addColorStop(0.6, '#f5c466');
+        grad.addColorStop(1, '#a87830');
+      } else {
+        grad.addColorStop(0, '#ffe8e0');
+        grad.addColorStop(0.55, '#ff9a7a');
+        grad.addColorStop(1, '#c84a3a');
+      }
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.ellipse(0, -12, 3.4, 14, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // tip highlight
+      ctx.fillStyle = golden ? 'rgba(255,245,214,0.4)' : 'rgba(255,255,255,0.25)';
+      ctx.beginPath();
+      ctx.ellipse(-0.6, -16, 1.2, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // wrapping band
+    ctx.fillStyle = golden ? '#f5c466' : '#3a2418';
+    ctx.beginPath();
+    ctx.ellipse(0, 2, 11, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // mukuroji seed (the heavy black ball)
+    const sg = ctx.createRadialGradient(-3, 6, 0, 0, 8, 12);
+    sg.addColorStop(0, '#2a2a2a');
+    sg.addColorStop(1, '#080808');
+    ctx.fillStyle = sg;
+    ctx.beginPath();
+    ctx.arc(0, 8, 9, 0, Math.PI * 2);
+    ctx.fill();
+
+    // seed gloss
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(-3, 5, 2.5, 1.4, -0.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // gold ring around seed for golden one
+    if (golden) {
+      ctx.strokeStyle = '#f5c466';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(0, 8, 10.5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  function drawPaddle(x, y, tilt, flash) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(tilt);
+
+    // handle (柄)
+    const handleGrad = ctx.createLinearGradient(-5, 30, 5, 80);
+    handleGrad.addColorStop(0, '#5a3a24');
+    handleGrad.addColorStop(1, '#2a1810');
+    ctx.fillStyle = handleGrad;
+    ctx.beginPath();
+    ctx.moveTo(-5, 28);
+    ctx.lineTo(5, 28);
+    ctx.lineTo(4, 80);
+    ctx.lineTo(-4, 80);
+    ctx.closePath();
+    ctx.fill();
+
+    // grip wrap
+    ctx.strokeStyle = '#8a5a30';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 5; i++) {
+      ctx.beginPath();
+      ctx.moveTo(-5, 38 + i * 8);
+      ctx.lineTo(5, 38 + i * 8 + 2);
+      ctx.stroke();
+    }
+
+    // board (hagoita)
+    const w = 96, h = 56;
+    const r = 10;
+    ctx.beginPath();
+    ctx.moveTo(-w/2 + r, -h/2);
+    ctx.lineTo(w/2 - r, -h/2);
+    ctx.quadraticCurveTo(w/2, -h/2, w/2, -h/2 + r);
+    ctx.lineTo(w/2, h/2 - r);
+    ctx.quadraticCurveTo(w/2, h/2, w/2 - r, h/2);
+    ctx.lineTo(-w/2 + r, h/2);
+    ctx.quadraticCurveTo(-w/2, h/2, -w/2, h/2 - r);
+    ctx.lineTo(-w/2, -h/2 + r);
+    ctx.quadraticCurveTo(-w/2, -h/2, -w/2 + r, -h/2);
+    ctx.closePath();
+
+    // face gradient (lacquer red)
+    const grad = ctx.createLinearGradient(0, -h/2, 0, h/2);
+    grad.addColorStop(0, '#e85858');
+    grad.addColorStop(0.55, '#b03030');
+    grad.addColorStop(1, '#6a1818');
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // inner shadow
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.fillRect(-w/2, h/2 - 8, w, 8);
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.fillRect(-w/2, -h/2, w, 5);
+    ctx.restore();
+
+    // gold border
+    ctx.strokeStyle = '#f5c466';
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+
+    // decorative sakura
+    drawSakura(0, 0, 13, 'rgba(255,235,200,0.85)', '#f5c466');
+
+    // tiny accent dots
+    ctx.fillStyle = 'rgba(245,196,102,0.6)';
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
+      const dx = Math.cos(a) * (w / 2 - 9);
+      const dy = Math.sin(a) * (h / 2 - 9);
+      ctx.beginPath();
+      ctx.arc(dx, dy, 1.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // flash overlay
+    if (flash > 0.05) {
+      ctx.globalAlpha = flash * 0.7;
+      ctx.fillStyle = '#fff5d6';
+      ctx.beginPath();
+      ctx.moveTo(-w/2 + r, -h/2);
+      ctx.lineTo(w/2 - r, -h/2);
+      ctx.quadraticCurveTo(w/2, -h/2, w/2, -h/2 + r);
+      ctx.lineTo(w/2, h/2 - r);
+      ctx.quadraticCurveTo(w/2, h/2, w/2 - r, h/2);
+      ctx.lineTo(-w/2 + r, h/2);
+      ctx.quadraticCurveTo(-w/2, h/2, -w/2, h/2 - r);
+      ctx.lineTo(-w/2, -h/2 + r);
+      ctx.quadraticCurveTo(-w/2, -h/2, -w/2 + r, -h/2);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  // === Main Loop ===
+  function draw() {
+    frame++;
+
+    // background
+    const bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, '#1a0a2e');
+    bg.addColorStop(0.4, '#0a0a1e');
+    bg.addColorStop(1, '#050818');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    // moon
+    const mx = W * 0.78, my = H * 0.16;
+    ctx.save();
+    const halo = ctx.createRadialGradient(mx, my, 0, mx, my, 90);
+    halo.addColorStop(0, 'rgba(245,230,194,0.32)');
+    halo.addColorStop(1, 'rgba(245,230,194,0)');
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(mx, my, 90, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#f5e6c2';
+    ctx.beginPath();
+    ctx.arc(mx, my, 36, 0, Math.PI * 2);
+    ctx.fill();
+    // craters
+    ctx.globalAlpha = 0.18;
+    ctx.fillStyle = '#a08c66';
+    ctx.beginPath();
+    ctx.arc(mx - 10, my - 6, 5, 0, Math.PI * 2);
+    ctx.arc(mx + 8, my + 4, 4, 0, Math.PI * 2);
+    ctx.arc(mx + 2, my - 12, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // stars
+    ctx.save();
+    for (let i = 0; i < 40; i++) {
+      const sx = (i * 137) % W;
+      const sy = ((i * 71) % (H * 0.5));
+      const tw = 0.5 + 0.5 * Math.sin(frame * 0.04 + i);
+      ctx.globalAlpha = 0.3 + 0.4 * tw;
+      ctx.fillStyle = '#fff5d6';
+      ctx.beginPath();
+      ctx.arc(sx, sy, 0.8 + (i % 3) * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // wind ease
+    wind += (windTarget - wind) * 0.02;
+
+    // leaves
+    for (const l of leaves) {
+      l.x += wind * l.depth * 2.2;
+      l.y += l.vy * l.depth;
+      l.rot += l.rotV;
+      if (l.y > H + 20) {
+        l.y = -20;
+        l.x = Math.random() * W;
+      }
+      if (l.x < -20) l.x = W + 20;
+      else if (l.x > W + 20) l.x = -20;
+
+      ctx.save();
+      ctx.translate(l.x, l.y);
+      ctx.rotate(l.rot);
+      ctx.globalAlpha = l.alpha;
+      ctx.fillStyle = `hsl(${l.hue},${l.sat}%,${l.light}%)`;
+      drawLeaf(l.size);
+      ctx.restore();
+    }
+
+    // ink splats
+    for (const s of inkSplats) {
+      s.alpha = Math.min(0.92, s.alpha + 0.06);
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.rotate(s.rot);
+      ctx.globalAlpha = s.alpha;
+      ctx.fillStyle = '#080808';
+      drawInkSplat(s.size, s.seed);
+      ctx.restore();
+    }
+
+    // === game logic ===
+    if (state === 'play') {
+      // paddle
+      paddle.lastX = paddle.x;
+      paddle.x += (paddle.targetX - paddle.x) * 0.30;
+      paddle.x = Math.max(paddle.w / 2, Math.min(W - paddle.w / 2, paddle.x));
+      paddle.velX = paddle.x - paddle.lastX;
+      paddle.tilt += ((paddle.velX * 0.03) - paddle.tilt) * 0.18;
+      paddle.flash *= 0.86;
+      paddle.shake *= 0.83;
+
+      // shuttle spawn delay
+      if (shuttle.spawning) {
+        shuttle.spawnTimer--;
+        if (shuttle.spawnTimer <= 0) reallySpawn();
+      }
+
+      if (shuttle.alive) {
+        // wind affects horizontal motion
+        shuttle.vx += wind * 0.05;
+        shuttle.vy += 0.16;
+        shuttle.vx *= 0.997;
+        shuttle.x += shuttle.vx;
+        shuttle.y += shuttle.vy;
+        shuttle.rot += shuttle.rotV;
+        shuttle.rotV *= 0.98;
+        // align rotation with velocity slightly when falling
+        if (shuttle.vy > 0) {
+          const targetAngle = Math.atan2(shuttle.vy, shuttle.vx) - Math.PI / 2;
+          let diff = targetAngle - shuttle.rot;
+          while (diff > Math.PI) diff -= Math.PI * 2;
+          while (diff < -Math.PI) diff += Math.PI * 2;
+          shuttle.rotV += diff * 0.003;
+        }
+
+        // bounce off side walls
+        if (shuttle.x < 22) { shuttle.x = 22; shuttle.vx = Math.abs(shuttle.vx) * 0.6; shuttle.rotV *= -0.5; }
+        if (shuttle.x > W - 22) { shuttle.x = W - 22; shuttle.vx = -Math.abs(shuttle.vx) * 0.6; shuttle.rotV *= -0.5; }
+
+        // ceiling soft bounce
+        if (shuttle.y < 20 && shuttle.vy < 0) { shuttle.vy = Math.abs(shuttle.vy) * 0.4; }
+
+        // trail
+        shuttle.trail.push({ x: shuttle.x, y: shuttle.y, age: 0 });
+        if (shuttle.trail.length > 14) shuttle.trail.shift();
+
+        // collision with paddle
+        const pTop = paddle.y - 12;
+        const pBot = paddle.y + paddle.h / 2;
+        if (
+          shuttle.vy > 0 &&
+          shuttle.y > pTop &&
+          shuttle.y < pBot &&
+          Math.abs(shuttle.x - paddle.x) < paddle.w / 2 + 10
+        ) {
+          hitShuttle();
+        } else if (shuttle.y > H + 40) {
+          missShuttle();
+        }
+
+        shuttle.flash *= 0.88;
+      }
+    }
+
+    // draw shuttle trail
+    if (shuttle.alive) {
+      for (let i = 0; i < shuttle.trail.length; i++) {
+        const t = shuttle.trail[i];
+        t.age++;
+        const a = (i / shuttle.trail.length) * 0.5;
+        ctx.save();
+        ctx.globalAlpha = a;
+        ctx.fillStyle = shuttle.golden ? '#f5c466' : '#ffe2c8';
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, 2 + i * 0.15, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+      drawShuttle(shuttle.x, shuttle.y, shuttle.rot, shuttle.golden, shuttle.flash);
+    }
+
+    // paddle
+    if (state === 'play' || state === 'end') {
+      const sx = (Math.random() - 0.5) * paddle.shake * 6;
+      const sy = (Math.random() - 0.5) * paddle.shake * 4;
+      drawPaddle(paddle.x + sx, paddle.y + sy, paddle.tilt, paddle.flash);
+    }
+
+    // particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.age++;
+      if (p.age > p.life) { particles.splice(i, 1); continue; }
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.13;
+      p.vx *= 0.98;
+
+      const a = 1 - p.age / p.life;
+      ctx.save();
+      ctx.globalAlpha = a;
+      if (p.color === 'gold') {
+        ctx.shadowColor = '#f5c466';
+        ctx.shadowBlur = 12;
+        ctx.fillStyle = '#fff5d6';
+      } else {
+        ctx.fillStyle = '#fff2c0';
+      }
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * a, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // rally text
+    for (let i = rallyText.length - 1; i >= 0; i--) {
+      const r = rallyText[i];
+      r.age++;
+      r.y -= 1.2;
+      if (r.age > r.life) { rallyText.splice(i, 1); continue; }
+      const a = 1 - r.age / r.life;
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.fillStyle = r.golden ? '#f5c466' : '#fff5d6';
+      ctx.font = '600 22px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = r.golden ? '#f5c466' : '#000';
+      ctx.shadowBlur = 8;
+      ctx.fillText(r.text, r.x, r.y);
+      ctx.restore();
+    }
+
+    // combo HUD fade
+    if (comboTimer > 0) {
+      comboTimer--;
+      if (comboTimer === 0) {
+        const el = document.getElementById('combo');
+        el.style.opacity = '0';
+        el.style.transform = 'translate(-50%, -50%) scale(0.85)';
+      }
+    }
+
+    requestAnimationFrame(draw);
+  }
+
+  draw();
+})();
+</script>
+</body>
+</html>
